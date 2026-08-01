@@ -1,0 +1,252 @@
+// =============================================================================
+// SCHEMA DE LA BASE DE DATOS — Tienda de ropa para mamá
+// =============================================================================
+// Prisma traduce este archivo a tablas SQL Server y genera un cliente tipado.
+//
+// Nota SQL Server (vs MySQL):
+// - No hay enums nativos en Prisma→SQL Server → usamos String + valores documentados
+// - No hay tipo Json → guardamos JSON como texto (NVarChar Max)
+// - Las FKs con varios caminos de Cascade se rompen con NoAction (regla de SQL Server)
+//
+// Flujo típico:
+// 1) Editas este schema
+// 2) npx prisma migrate dev --name descripcion
+// 3) Prisma aplica el cambio en SQL Server y regenera el cliente
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// User: cuenta de cliente o administrador
+// role: "CLIENT" | "ADMIN"
+// -----------------------------------------------------------------------------
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  // Guardamos el hash de bcrypt, NUNCA la contraseña en texto plano
+  password  String
+  firstName String
+  lastName  String
+  phone     String?
+  role      String   @default("CLIENT")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  addresses Address[]
+  orders    Order[]
+}
+
+// -----------------------------------------------------------------------------
+// Address: dirección de envío ligada a un usuario
+// -----------------------------------------------------------------------------
+model Address {
+  id         String   @id @default(cuid())
+  userId     String
+  label      String? // Ej: "Casa", "Trabajo"
+  street     String
+  city       String
+  state      String
+  postalCode String
+  country    String   @default("PE")
+  phone      String?
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  orders Order[]
+
+  @@index([userId])
+}
+
+// -----------------------------------------------------------------------------
+// Category: Premamá, Lactancia, Postparto, etc.
+// -----------------------------------------------------------------------------
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+}
+
+// -----------------------------------------------------------------------------
+// Product: artículo del catálogo (soft-delete con isActive)
+// -----------------------------------------------------------------------------
+model Product {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  description   String   @db.Text
+  price         Decimal  @db.Decimal(10, 2)
+  // Precio con descuento opcional; si es null, se usa price
+  discountPrice Decimal? @db.Decimal(10, 2)
+  categoryId    String
+  // Soft-delete: no borramos filas; las ocultamos del catálogo público
+  isActive      Boolean  @default(true)
+  isFeatured    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  category   Category         @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  images     ProductImage[]
+  variants   ProductVariant[]
+  orderItems OrderItem[]
+
+  @@index([categoryId])
+  @@index([isActive])
+  @@index([isFeatured])
+}
+
+// -----------------------------------------------------------------------------
+// ProductImage: fotos ligadas a un producto
+// -----------------------------------------------------------------------------
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  url       String
+  alt       String?
+  // Orden de visualización en galerías/carruseles
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([productId])
+}
+
+// -----------------------------------------------------------------------------
+// ProductVariant: combinación talla + color con stock propio (SKU único)
+// -----------------------------------------------------------------------------
+model ProductVariant {
+  id        String   @id @default(cuid())
+  productId String
+  sku       String   @unique
+  size      String
+  color     String
+  stock     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  orderItems OrderItem[]
+
+  @@unique([productId, size, color])
+  @@index([productId])
+}
+
+// -----------------------------------------------------------------------------
+// Order: pedido completo de un usuario
+// status: PENDING | PAID | PROCESSING | SHIPPED | DELIVERED | CANCELLED
+// -----------------------------------------------------------------------------
+model Order {
+  id             String   @id @default(cuid())
+  userId         String
+  addressId      String
+  status         String   @default("PENDING")
+  subtotal       Decimal  @db.Decimal(10, 2)
+  shippingCost   Decimal  @default(0) @db.Decimal(10, 2)
+  discountAmount Decimal  @default(0) @db.Decimal(10, 2)
+  // Código usado (texto congelado por si el cupón se edita/borra después)
+  promoCode      String?
+  promoCodeId    String?
+  total          Decimal  @db.Decimal(10, 2)
+  // Notas opcionales del cliente (ej: "dejar en recepción")
+  notes          String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // NoAction en user/address: SQL Server no permite Cascade por varios caminos
+  // (User → Order y User → Address → Order)
+  user      User       @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  address   Address    @relation(fields: [addressId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  promo     PromoCode? @relation(fields: [promoCodeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  items     OrderItem[]
+  payment   Payment?
+
+  @@index([userId])
+  @@index([status])
+  @@index([promoCodeId])
+}
+
+// -----------------------------------------------------------------------------
+// PromoCode: cupones creados por ADMIN (PERCENT = % | FIXED = S/.)
+// Vigencia por startsAt/endsAt; isActive permite pausarlos.
+// -----------------------------------------------------------------------------
+model PromoCode {
+  id             String    @id @default(cuid())
+  code           String    @unique
+  // "PERCENT" | "FIXED"
+  type           String
+  value          Decimal   @db.Decimal(10, 2)
+  startsAt       DateTime
+  endsAt         DateTime
+  isActive       Boolean   @default(true)
+  // null = usos ilimitados
+  maxUses        Int?
+  usedCount      Int       @default(0)
+  // Pedido mínimo (subtotal) para aplicar el cupón; null = sin mínimo
+  minOrderAmount Decimal?  @db.Decimal(10, 2)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  orders Order[]
+
+  @@index([isActive])
+  @@index([startsAt, endsAt])
+}
+
+// -----------------------------------------------------------------------------
+// OrderItem: línea del pedido (producto/variante + cantidad + precio congelado)
+// Guardamos unitPrice porque el precio del catálogo puede cambiar después.
+// -----------------------------------------------------------------------------
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  productId String
+  variantId String
+  quantity  Int
+  unitPrice Decimal @db.Decimal(10, 2)
+
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  // NoAction: evita Cascades múltiples Product → Variant → OrderItem y Product → OrderItem
+  product Product        @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([orderId])
+}
+
+// -----------------------------------------------------------------------------
+// Payment: resultado del cargo en Openpay ligado a un pedido
+// status: PENDING | APPROVED | REJECTED | REFUNDED
+// method: card | store (Yape/Kashio) | null
+// -----------------------------------------------------------------------------
+model Payment {
+  id               String   @id @default(cuid())
+  orderId          String   @unique
+  // ID del cargo en Openpay (antes culqiChargeId)
+  openpayChargeId  String?
+  // Referencia de pago en tienda / Yape (method store)
+  paymentReference String?
+  // "card" | "store"
+  method           String?
+  amount           Decimal  @db.Decimal(10, 2)
+  currency         String   @default("PEN")
+  status           String   @default("PENDING")
+  // JSON como texto (SQL Server no tiene Json nativo en Prisma)
+  rawResponse      String?  @db.NVarChar(Max)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}

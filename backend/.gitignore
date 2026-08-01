@@ -1,0 +1,18 @@
+# Dependencies
+node_modules
+
+# Build
+dist
+coverage
+
+# Env (secretos — nunca subir)
+.env
+.env.local
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db
+
+# Prisma
+/generated/prisma
