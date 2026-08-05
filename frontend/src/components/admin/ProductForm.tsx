@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -18,7 +18,9 @@ const schema = z.object({
   categoryId: z.string().min(1, 'Elige categoría'),
   isFeatured: z.boolean(),
   isActive: z.boolean(),
-  imageUrl: z.string().min(5, 'URL de imagen'),
+  images: z
+    .array(z.object({ url: z.string().min(5) }))
+    .min(1, 'Agrega al menos una imagen'),
   variants: z
     .array(
       z.object({
@@ -33,11 +35,17 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
+const MAX_IMAGES = 12;
+
 export function ProductForm({ product }: { product?: Product }) {
   const router = useRouter();
   const token = useAuthStore((s) => s.token)!;
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [urlDraft, setUrlDraft] = useState('');
+  const [showUrlField, setShowUrlField] = useState(false);
 
   const {
     register,
@@ -59,7 +67,12 @@ export function ProductForm({ product }: { product?: Product }) {
           categoryId: product.categoryId,
           isFeatured: product.isFeatured,
           isActive: product.isActive,
-          imageUrl: product.images?.[0]?.url ?? '',
+          images:
+            product.images?.length > 0
+              ? [...product.images]
+                  .sort((a, b) => a.sortOrder - b.sortOrder)
+                  .map((img) => ({ url: img.url }))
+              : [],
           variants: product.variants.map((v) => ({
             sku: v.sku,
             size: v.size,
@@ -75,12 +88,26 @@ export function ProductForm({ product }: { product?: Product }) {
           categoryId: '',
           isFeatured: false,
           isActive: true,
-          imageUrl: '',
+          images: [],
           variants: [{ sku: '', size: 'S', color: '', stock: 10 }],
         },
   });
 
-  const { fields, append, remove } = useFieldArray({
+  const {
+    fields: imageFields,
+    append: appendImage,
+    remove: removeImage,
+    move: moveImage,
+  } = useFieldArray({
+    control,
+    name: 'images',
+  });
+
+  const {
+    fields: variantFields,
+    append: appendVariant,
+    remove: removeVariant,
+  } = useFieldArray({
     control,
     name: 'variants',
   });
@@ -88,6 +115,59 @@ export function ProductForm({ product }: { product?: Product }) {
   useEffect(() => {
     api.getCategories().then(setCategories).catch(() => undefined);
   }, []);
+
+  const onPickFiles = async (fileList: FileList | null) => {
+    if (!fileList?.length) return;
+    setServerError(null);
+
+    const remaining = MAX_IMAGES - imageFields.length;
+    if (remaining <= 0) {
+      setServerError(`Máximo ${MAX_IMAGES} imágenes por producto`);
+      return;
+    }
+
+    const files = Array.from(fileList).slice(0, remaining);
+    setUploading(true);
+
+    try {
+      for (const file of files) {
+        if (!file.type.startsWith('image/')) {
+          throw new Error(`"${file.name}" no es una imagen`);
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          throw new Error(`"${file.name}" supera 5 MB`);
+        }
+        const result = await api.uploadProductImage(token, file);
+        appendImage({ url: result.url });
+      }
+    } catch (e) {
+      setServerError(
+        e instanceof ApiError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : 'No se pudo subir la imagen',
+      );
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const addUrlImage = () => {
+    const url = urlDraft.trim();
+    if (url.length < 5) {
+      setServerError('Pega una URL válida');
+      return;
+    }
+    if (imageFields.length >= MAX_IMAGES) {
+      setServerError(`Máximo ${MAX_IMAGES} imágenes por producto`);
+      return;
+    }
+    appendImage({ url });
+    setUrlDraft('');
+    setServerError(null);
+  };
 
   const onSubmit = async (values: FormValues) => {
     setServerError(null);
@@ -103,7 +183,11 @@ export function ProductForm({ product }: { product?: Product }) {
       categoryId: values.categoryId,
       isFeatured: values.isFeatured,
       isActive: values.isActive,
-      images: [{ url: values.imageUrl, alt: values.name }],
+      images: values.images.map((img, index) => ({
+        url: img.url,
+        alt: values.name,
+        sortOrder: index,
+      })),
       variants: values.variants,
     };
 
@@ -183,14 +267,109 @@ export function ProductForm({ product }: { product?: Product }) {
       </div>
 
       <div>
-        <label className="field-label">URL imagen</label>
+        <label className="field-label">
+          Imágenes ({imageFields.length}/{MAX_IMAGES})
+        </label>
+
         <input
-          className="field-input"
-          placeholder="https://images.unsplash.com/..."
-          {...register('imageUrl')}
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          multiple
+          className="sr-only"
+          onChange={(e) => void onPickFiles(e.target.files)}
         />
-        {errors.imageUrl && (
-          <p className="field-error">{errors.imageUrl.message}</p>
+
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={uploading || imageFields.length >= MAX_IMAGES}
+            onClick={() => fileInputRef.current?.click()}
+            className="btn-outline disabled:opacity-40"
+          >
+            {uploading ? 'Subiendo…' : 'Agregar archivo'}
+          </button>
+          <p className="font-[family-name:var(--font-body)] text-xs text-[var(--color-ink-soft)]">
+            Varias a la vez · la primera es portada · JPG/PNG/WEBP/GIF · máx. 5 MB
+          </p>
+        </div>
+
+        {imageFields.length > 0 && (
+          <ul className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {imageFields.map((field, index) => (
+              <li
+                key={field.id}
+                className="border border-[var(--color-line)] bg-[var(--color-stone)]"
+              >
+                <div className="relative aspect-[3/4] overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={field.url}
+                    alt={`Imagen ${index + 1}`}
+                    className="h-full w-full object-cover"
+                  />
+                  {index === 0 && (
+                    <span className="absolute left-2 top-2 bg-[var(--color-ink)] px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-paper)]">
+                      Portada
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-1 px-2 py-2">
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      disabled={index === 0}
+                      onClick={() => moveImage(index, index - 1)}
+                      className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-ink-soft)] disabled:opacity-30"
+                    >
+                      ←
+                    </button>
+                    <button
+                      type="button"
+                      disabled={index === imageFields.length - 1}
+                      onClick={() => moveImage(index, index + 1)}
+                      className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-ink-soft)] disabled:opacity-30"
+                    >
+                      →
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeImage(index)}
+                    className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-rose)]"
+                  >
+                    Quitar
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <button
+          type="button"
+          className="mt-3 text-[11px] uppercase tracking-[0.14em] text-[var(--color-ink-soft)] underline-offset-4 hover:underline"
+          onClick={() => setShowUrlField((v) => !v)}
+        >
+          {showUrlField ? 'Ocultar URL' : 'Agregar por URL'}
+        </button>
+
+        {showUrlField && (
+          <div className="mt-2 flex gap-2">
+            <input
+              className="field-input"
+              placeholder="https://…"
+              value={urlDraft}
+              onChange={(e) => setUrlDraft(e.target.value)}
+            />
+            <button type="button" className="btn-outline shrink-0" onClick={addUrlImage}>
+              Añadir
+            </button>
+          </div>
+        )}
+
+        {errors.images && (
+          <p className="field-error">{errors.images.message}</p>
         )}
       </div>
 
@@ -210,14 +389,14 @@ export function ProductForm({ product }: { product?: Product }) {
             type="button"
             className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-ink-soft)]"
             onClick={() =>
-              append({ sku: '', size: 'M', color: '', stock: 5 })
+              appendVariant({ sku: '', size: 'M', color: '', stock: 5 })
             }
           >
             + Variante
           </button>
         </div>
         <div className="mt-3 space-y-3">
-          {fields.map((field, index) => (
+          {variantFields.map((field, index) => (
             <div
               key={field.id}
               className="grid gap-2 border border-[var(--color-line)] p-3 sm:grid-cols-5"
@@ -245,8 +424,8 @@ export function ProductForm({ product }: { product?: Product }) {
               />
               <button
                 type="button"
-                disabled={fields.length === 1}
-                onClick={() => remove(index)}
+                disabled={variantFields.length === 1}
+                onClick={() => removeVariant(index)}
                 className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-rose)] disabled:opacity-30"
               >
                 Quitar
@@ -258,7 +437,11 @@ export function ProductForm({ product }: { product?: Product }) {
 
       {serverError && <p className="field-error">{serverError}</p>}
 
-      <button type="submit" disabled={isSubmitting} className="btn-outline">
+      <button
+        type="submit"
+        disabled={isSubmitting || uploading}
+        className="btn-outline"
+      >
         {isSubmitting ? 'Guardando…' : product ? 'Guardar cambios' : 'Crear producto'}
       </button>
     </form>

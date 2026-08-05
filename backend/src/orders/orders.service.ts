@@ -15,6 +15,11 @@ import {
   OrderStatus,
   PaymentStatus,
 } from '../common/constants/order-status';
+import {
+  StockMoveReason,
+  StockMoveType,
+} from '../common/constants/stock';
+import { InventoryService } from '../inventory/inventory.service';
 
 const orderInclude = {
   items: {
@@ -32,6 +37,7 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly promoCodesService: PromoCodesService,
+    private readonly inventoryService: InventoryService,
   ) {}
 
   /**
@@ -110,7 +116,23 @@ export class OrdersService {
       Math.round((subtotal - discountAmount + shippingCost) * 100) / 100;
 
     return this.prisma.$transaction(async (tx) => {
+      const saleMovements: Array<{
+        variantId: string;
+        quantity: number;
+        previousStock: number;
+        newStock: number;
+      }> = [];
+
       for (const item of dto.items) {
+        const current = await tx.productVariant.findUnique({
+          where: { id: item.variantId },
+        });
+        if (!current || current.stock < item.quantity) {
+          throw new BadRequestException(
+            'Stock insuficiente (otro cliente se adelantó)',
+          );
+        }
+
         const updated = await tx.productVariant.updateMany({
           where: {
             id: item.variantId,
@@ -123,6 +145,13 @@ export class OrdersService {
             'Stock insuficiente (otro cliente se adelantó)',
           );
         }
+
+        saleMovements.push({
+          variantId: item.variantId,
+          quantity: item.quantity,
+          previousStock: current.stock,
+          newStock: current.stock - item.quantity,
+        });
       }
 
       const order = await tx.order.create({
@@ -148,6 +177,19 @@ export class OrdersService {
         },
         include: orderInclude,
       });
+
+      for (const m of saleMovements) {
+        await this.inventoryService.createMovement(tx, {
+          variantId: m.variantId,
+          type: StockMoveType.OUT,
+          reason: StockMoveReason.SALE,
+          quantity: m.quantity,
+          previousStock: m.previousStock,
+          newStock: m.newStock,
+          orderId: order.id,
+          note: `Pedido ${order.id}`,
+        });
+      }
 
       if (promoCodeId) {
         await tx.promoCode.update({

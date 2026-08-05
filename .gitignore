@@ -31,5 +31,8 @@ catalogo-sample.txt
 catalogo-texto.txt
 tools-pdf/
 
+# Uploads locales del backend
+backend/uploads/
+
 # Vercel / misc
 .vercel/

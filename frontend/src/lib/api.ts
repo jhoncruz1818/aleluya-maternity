@@ -162,6 +162,36 @@ export const api = {
       token,
       body,
     }),
+  /** Sube imagen desde el PC (multipart). Devuelve URL pública del API. */
+  uploadProductImage: async (token: string, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(buildUrl('/uploads/product-image'), {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: form,
+    });
+    if (!res.ok) {
+      let message = `Error ${res.status}`;
+      try {
+        const data = await res.json();
+        message = data.message ?? message;
+        if (Array.isArray(message)) message = message.join(', ');
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, message);
+    }
+    return res.json() as Promise<{
+      url: string;
+      filename: string;
+      size: number;
+      mimeType: string;
+    }>;
+  },
   deleteProduct: (token: string, id: string) =>
     apiFetch<{ message: string }>(`/products/${id}`, {
       method: 'DELETE',
@@ -219,4 +249,58 @@ export const api = {
       token,
       body,
     }),
+
+  getInventory: (token: string, query?: RequestOptions['query']) =>
+    apiFetch<import('./types').InventoryListResponse>('/inventory', {
+      token,
+      query,
+    }),
+  getInventoryMovements: (
+    token: string,
+    variantId: string,
+    query?: RequestOptions['query'],
+  ) =>
+    apiFetch<import('./types').InventoryMovementsResponse>(
+      `/inventory/${variantId}/movements`,
+      { token, query },
+    ),
+  createStockMovement: (
+    token: string,
+    variantId: string,
+    body: {
+      type: 'IN' | 'OUT';
+      quantity: number;
+      reason?: 'PURCHASE' | 'ADJUSTMENT' | 'RETURN';
+      note?: string;
+    },
+  ) =>
+    apiFetch<{
+      movement: import('./types').StockMovement;
+      stock: number;
+      level: import('./types').StockLevel;
+    }>(`/inventory/${variantId}/movements`, {
+      method: 'POST',
+      token,
+      body,
+    }),
+  undoStockMovement: (token: string, movementId: string) =>
+    apiFetch<{
+      message: string;
+      variantId: string;
+      stock: number;
+      level: import('./types').StockLevel;
+    }>(`/inventory/movements/${movementId}`, {
+      method: 'DELETE',
+      token,
+    }),
+  purgeStockMovement: (token: string, movementId: string) =>
+    apiFetch<{ message: string; variantId: string }>(
+      `/inventory/movements/${movementId}/purge`,
+      { method: 'DELETE', token },
+    ),
+  purgeAllUndoneMovements: (token: string, variantId: string) =>
+    apiFetch<{ message: string; deleted: number; variantId: string }>(
+      `/inventory/${variantId}/undone`,
+      { method: 'DELETE', token },
+    ),
 };

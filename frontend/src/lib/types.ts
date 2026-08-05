@@ -103,6 +103,84 @@ export interface PromoValidation {
   message: string;
 }
 
+export type StockLevel = 'low' | 'ok' | 'high';
+
+export interface InventoryItem {
+  id: string;
+  sku: string;
+  size: string;
+  color: string;
+  stock: number;
+  level: StockLevel;
+  product: {
+    id: string;
+    name: string;
+    slug: string;
+    imageUrl: string | null;
+  };
+}
+
+export interface InventoryListResponse {
+  summary: {
+    total: number;
+    low: number;
+    ok: number;
+    high: number;
+    lowThreshold: number;
+    highThreshold: number;
+  };
+  items: InventoryItem[];
+}
+
+export interface StockMovement {
+  id: string;
+  type: 'IN' | 'OUT';
+  reason: string;
+  quantity: number;
+  previousStock: number;
+  newStock: number;
+  note: string | null;
+  orderId: string | null;
+  createdAt: string;
+  undoneAt?: string | null;
+  createdBy?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+  } | null;
+  undoneBy?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+  } | null;
+  order?: { id: string; status: string } | null;
+}
+
+export interface InventoryMovementsResponse {
+  variant: {
+    id: string;
+    sku: string;
+    size: string;
+    color: string;
+    stock: number;
+    level: StockLevel;
+    product: { id: string; name: string; slug: string };
+  };
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+  permissions?: {
+    canPurge: boolean;
+  };
+  undoneCount?: number;
+  items: StockMovement[];
+}
+
 export interface AuthResponse {
   accessToken: string;
   user: {

@@ -11,6 +11,11 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
 import { slugify } from '../common/utils/slugify';
 import { buildPaginationMeta } from '../common/dto/pagination.dto';
+import {
+  StockMoveReason,
+  StockMoveType,
+} from '../common/constants/stock';
+import { InventoryService } from '../inventory/inventory.service';
 
 /** Includes típicos al devolver un producto completo */
 const productInclude = {
@@ -21,7 +26,10 @@ const productInclude = {
 
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inventoryService: InventoryService,
+  ) {}
 
   async create(dto: CreateProductDto) {
     await this.ensureCategoryExists(dto.categoryId);
@@ -31,35 +39,53 @@ export class ProductsService {
     this.validatePrices(dto.price, dto.discountPrice);
     await this.ensureSkusUnique(dto.variants.map((v) => v.sku));
 
-    return this.prisma.product.create({
-      data: {
-        name: dto.name.trim(),
-        slug,
-        description: dto.description,
-        price: dto.price,
-        discountPrice: dto.discountPrice,
-        categoryId: dto.categoryId,
-        isFeatured: dto.isFeatured ?? false,
-        isActive: dto.isActive ?? true,
-        images: dto.images?.length
-          ? {
-              create: dto.images.map((img, index) => ({
-                url: img.url,
-                alt: img.alt,
-                sortOrder: img.sortOrder ?? index,
-              })),
-            }
-          : undefined,
-        variants: {
-          create: dto.variants.map((v) => ({
-            sku: v.sku.trim().toUpperCase(),
-            size: v.size,
-            color: v.color,
-            stock: v.stock,
-          })),
+    return this.prisma.$transaction(async (tx) => {
+      const product = await tx.product.create({
+        data: {
+          name: dto.name.trim(),
+          slug,
+          description: dto.description,
+          price: dto.price,
+          discountPrice: dto.discountPrice,
+          categoryId: dto.categoryId,
+          isFeatured: dto.isFeatured ?? false,
+          isActive: dto.isActive ?? true,
+          images: dto.images?.length
+            ? {
+                create: dto.images.map((img, index) => ({
+                  url: img.url,
+                  alt: img.alt,
+                  sortOrder: img.sortOrder ?? index,
+                })),
+              }
+            : undefined,
+          variants: {
+            create: dto.variants.map((v) => ({
+              sku: v.sku.trim().toUpperCase(),
+              size: v.size,
+              color: v.color,
+              stock: v.stock,
+            })),
+          },
         },
-      },
-      include: productInclude,
+        include: productInclude,
+      });
+
+      for (const v of product.variants) {
+        if (v.stock > 0) {
+          await this.inventoryService.createMovement(tx, {
+            variantId: v.id,
+            type: StockMoveType.IN,
+            reason: StockMoveReason.INITIAL,
+            quantity: v.stock,
+            previousStock: 0,
+            newStock: v.stock,
+            note: 'Stock inicial al crear producto',
+          });
+        }
+      }
+
+      return product;
     });
   }
 

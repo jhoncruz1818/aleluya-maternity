@@ -243,7 +243,8 @@ SQL Server (tienda_ropa_mama)
 cd backend
 npm run start:dev      # API en watch mode
 npm run prisma:studio  # UI de la base
-npm run build
+npm run prisma:deploy  # Aplicar migraciones en producción
+npm run build && npm run start:prod
 
 # Frontend
 cd frontend
@@ -251,6 +252,74 @@ npm run dev            # http://localhost:3000
 npm run build          # build de producción
 npm run start          # servir el build
 ```
+
+---
+
+## Despliegue a producción
+
+### Arquitectura recomendada
+
+| Pieza | Dónde |
+|-------|--------|
+| Frontend (Next.js) | Vercel |
+| Backend (NestJS) | Railway o Render |
+| Base de datos | Azure SQL Database |
+| Imágenes subidas | Disco persistente en el API **o** S3/R2 (el disco efímero se borra al redeploy) |
+
+### 1. Base de datos (Azure SQL)
+
+1. Crea una base Azure SQL.
+2. Arma `DATABASE_URL` con `encrypt=true` (sin `trustServerCertificate=true` en prod).
+3. En el servidor del API, en el release:
+
+```bash
+cd backend
+npm ci
+npx prisma migrate deploy
+npm run build
+npm run start:prod
+```
+
+### 2. Backend (Railway / Render)
+
+Variables mínimas (ver `backend/.env.example`):
+
+- `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL` (URL exacta de Vercel)
+- `PUBLIC_API_URL` (URL pública del API, sin `/api`)
+- `OPENPAY_*`, `OWNER_EMAILS`
+- `OPENPAY_PRODUCTION=true` cuando pases a live
+
+Start command: `npm run start:prod` (tras build).  
+Puerto: usa `$PORT` del hosting (Nest lee `PORT`).
+
+Webhook Openpay (Yape):
+
+`POST https://TU-API/api/payments/webhook/openpay`
+
+### 3. Frontend (Vercel)
+
+Variables (ver `frontend/.env.example`):
+
+- `NEXT_PUBLIC_API_URL=https://TU-API/api`
+- `NEXT_PUBLIC_API_HOST=tu-api.ejemplo.com` (sin `https://`)
+- `NEXT_PUBLIC_OPENPAY_MERCHANT_ID`, `NEXT_PUBLIC_OPENPAY_PUBLIC_KEY`
+- `NEXT_PUBLIC_OPENPAY_SANDBOX=false` en live
+
+### 4. Checklist post-deploy
+
+- [ ] Login / registro
+- [ ] Catálogo e imágenes
+- [ ] Admin: productos + subir foto
+- [ ] Inventario
+- [ ] Checkout sandbox Openpay
+- [ ] Webhook llega al API (si usas Yape)
+- [ ] Usuario dueño en `OWNER_EMAILS` puede limpiar anulados
+
+### Notas
+
+- Los `.env` **no** van a Git; configúralos en cada hosting.
+- Docker **no es obligatorio** con Vercel + Railway/Render + Azure SQL.
+- Tras cambiar rol en BD, el usuario debe cerrar sesión y volver a entrar.
 
 ---
 
@@ -264,6 +333,8 @@ npm run start          # servir el build
 | Openpay 503 | Falta `OPENPAY_PRIVATE_KEY` / `OPENPAY_MERCHANT_ID` en `backend/.env` |
 | Admin redirige al home | El usuario no tiene `role = ADMIN` en la tabla `User` |
 | Puerto 3001 ocupado | Cierra el Nest anterior o cambia `PORT` |
+| Fotos subidas no se ven en prod | `PUBLIC_API_URL`, `NEXT_PUBLIC_API_HOST` y volumen persistente / CDN |
+| CORS en prod | `FRONTEND_URL` debe coincidir exacto con la URL de Vercel |
 
 ---
 
