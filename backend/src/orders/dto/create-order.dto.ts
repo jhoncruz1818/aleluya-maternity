@@ -3,10 +3,11 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsIn,
   IsInt,
-  IsNumber,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -17,16 +18,18 @@ export class CreateOrderItemDto {
   @IsString()
   variantId: string;
 
-  @ApiProperty({ example: 1, minimum: 1 })
+  @ApiProperty({ example: 1, minimum: 1, maximum: 20 })
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(20)
   quantity: number;
 }
 
 /**
  * Crear pedido a partir del "carrito" del frontend.
  * El carrito vive en el cliente (Zustand); aquí solo llega el snapshot.
+ * El costo de envío se calcula en el servidor a partir de shippingMethod.
  */
 export class CreateOrderDto {
   @ApiProperty({ description: 'ID de una dirección propia del usuario' })
@@ -40,12 +43,15 @@ export class CreateOrderDto {
   @Type(() => CreateOrderItemDto)
   items: CreateOrderItemDto[];
 
-  @ApiPropertyOptional({ example: 15, description: 'Costo de envío (PEN)' })
+  @ApiPropertyOptional({
+    enum: ['standard', 'express'],
+    default: 'standard',
+    description: 'Método de envío (el monto lo calcula el servidor)',
+  })
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  shippingCost?: number;
+  @IsString()
+  @IsIn(['standard', 'express'])
+  shippingMethod?: 'standard' | 'express';
 
   @ApiPropertyOptional({ example: 'Dejar en recepción' })
   @IsOptional()

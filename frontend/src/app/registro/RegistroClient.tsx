@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { api, ApiError } from '@/lib/api';
 import { registerSchema, type RegisterValues } from '@/lib/schemas';
 import { useAuthStore } from '@/store/auth';
+import { safeNextPath } from '@/lib/safe-next';
 
 export default function RegistroClient() {
   const router = useRouter();
@@ -25,7 +26,7 @@ export default function RegistroClient() {
     try {
       const res = await api.register(values);
       setSession(res.accessToken, res.user);
-      router.push(search.get('next') || '/');
+      router.push(safeNextPath(search.get('next')));
     } catch (e) {
       setError('root', {
         message: e instanceof ApiError ? e.message : 'No se pudo registrar',

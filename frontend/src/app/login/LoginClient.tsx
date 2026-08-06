@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { api, ApiError } from '@/lib/api';
 import { loginSchema, type LoginValues } from '@/lib/schemas';
 import { useAuthStore } from '@/store/auth';
+import { safeNextPath } from '@/lib/safe-next';
 
 export default function LoginClient() {
   const router = useRouter();
@@ -25,13 +26,20 @@ export default function LoginClient() {
     try {
       const res = await api.login(values);
       setSession(res.accessToken, res.user);
-      router.push(search.get('next') || '/');
+      router.push(safeNextPath(search.get('next')));
     } catch (e) {
       setError('root', {
         message: e instanceof ApiError ? e.message : 'No se pudo iniciar sesión',
       });
     }
   };
+
+  const nextQs = (() => {
+    const next = search.get('next');
+    if (!next) return '';
+    const safe = safeNextPath(next, '');
+    return safe ? `?next=${encodeURIComponent(safe)}` : '';
+  })();
 
   return (
     <div className="mx-auto flex min-h-[80vh] max-w-md flex-col justify-center px-5 pt-28 pb-16">
@@ -83,7 +91,7 @@ export default function LoginClient() {
       <p className="mt-8 font-[family-name:var(--font-body)] text-sm text-[var(--color-ink-soft)]">
         ¿No tienes cuenta?{' '}
         <Link
-          href={`/registro${search.get('next') ? `?next=${encodeURIComponent(search.get('next')!)}` : ''}`}
+          href={`/registro${nextQs}`}
           className="text-[var(--color-ink)] underline-offset-4 hover:underline"
         >
           Crear una

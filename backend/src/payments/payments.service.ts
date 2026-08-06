@@ -132,11 +132,15 @@ export class PaymentsService {
     const status = String(charge.status || '').toUpperCase();
     const reference = charge.payment_method?.reference ?? null;
 
-    const isCardApproved =
+    // Solo COMPLETED cuenta como pagado. IN_PROGRESS queda pendiente (webhook/sync).
+    const isCardApproved = dto.method === 'card' && status === 'COMPLETED';
+    const isCardRejected =
       dto.method === 'card' &&
-      (status === 'COMPLETED' || status === 'IN_PROGRESS');
+      status !== 'COMPLETED' &&
+      status !== 'IN_PROGRESS' &&
+      status !== '';
 
-    if (dto.method === 'card' && !isCardApproved) {
+    if (isCardRejected) {
       await this.prisma.payment.update({
         where: { id: order.payment.id },
         data: {
@@ -151,7 +155,7 @@ export class PaymentsService {
       );
     }
 
-    // Yape/store: siempre PENDING hasta charge.succeeded por webhook
+    // Yape/store y tarjeta IN_PROGRESS: PENDING hasta charge.succeeded
     const updated = await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.update({
         where: { id: order.payment!.id },
@@ -190,6 +194,20 @@ export class PaymentsService {
         paymentReference: reference,
         instructions:
           'Abre tu app de Yape, ve a Yapear Servicios, busca Kashio en la categoría Compras Online, ingresa este código y confirma. El pedido se actualizará automáticamente cuando Openpay notifique el pago.',
+        order: updated.order,
+        payment: updated.payment,
+        openpay: charge,
+      };
+    }
+
+    if (!isCardApproved) {
+      this.logger.log(
+        `Cargo tarjeta pendiente order=${order.id} status=${status} (espera webhook/sync)`,
+      );
+      return {
+        message: 'Pago en proceso. Confirmaremos cuando Openpay lo complete.',
+        pending: true,
+        openpayStatus: status,
         order: updated.order,
         payment: updated.payment,
         openpay: charge,
@@ -382,29 +400,46 @@ export class PaymentsService {
       };
     }
 
-    // Verificación extra: consultar el cargo en Openpay antes de confiar
-    if (opts.chargeId && this.openpay.isConfigured()) {
-      try {
-        const live = await this.openpay.getCharge(opts.chargeId);
-        const liveStatus = String(live.status || '').toUpperCase();
-        if (liveStatus !== 'COMPLETED') {
-          this.logger.warn(
-            `Webhook succeeded pero cargo live status=${liveStatus}`,
-          );
-          return {
-            received: true,
-            matched: true,
-            deferred: true,
-            openpayStatus: liveStatus,
-            orderId: payment.orderId,
-          };
-        }
-      } catch (err) {
+    // Fail-closed: sin revalidación COMPLETED no marcamos pagado
+    if (!opts.chargeId || !this.openpay.isConfigured()) {
+      this.logger.warn(
+        `Webhook succeeded sin revalidación posible chargeId=${opts.chargeId}`,
+      );
+      return {
+        received: true,
+        matched: true,
+        deferred: true,
+        reason: 'revalidation_unavailable',
+        orderId: payment.orderId,
+      };
+    }
+
+    try {
+      const live = await this.openpay.getCharge(opts.chargeId);
+      const liveStatus = String(live.status || '').toUpperCase();
+      if (liveStatus !== 'COMPLETED') {
         this.logger.warn(
-          `No se pudo revalidar cargo ${opts.chargeId}: ${String(err)}`,
+          `Webhook succeeded pero cargo live status=${liveStatus}`,
         );
-        // Seguimos con el webhook si la API falla temporalmente
+        return {
+          received: true,
+          matched: true,
+          deferred: true,
+          openpayStatus: liveStatus,
+          orderId: payment.orderId,
+        };
       }
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo revalidar cargo ${opts.chargeId}: ${String(err)}`,
+      );
+      return {
+        received: true,
+        matched: true,
+        deferred: true,
+        reason: 'revalidation_failed',
+        orderId: payment.orderId,
+      };
     }
 
     await this.markOrderPaid(payment.orderId, payment.id, opts.payload);
@@ -455,16 +490,31 @@ export class PaymentsService {
   }
 
   private assertWebhookBasicAuth(authHeader?: string) {
-    const user = this.config.get<string>('OPENPAY_WEBHOOK_USER');
-    const pass = this.config.get<string>('OPENPAY_WEBHOOK_PASSWORD');
-    if (!user && !pass) return; // auth opcional
+    const user = this.config.get<string>('OPENPAY_WEBHOOK_USER')?.trim();
+    const pass = this.config.get<string>('OPENPAY_WEBHOOK_PASSWORD')?.trim();
+    const isProd = this.config.get<string>('NODE_ENV') === 'production';
+
+    // En producción siempre exigimos Basic Auth (fail-closed)
+    if (!user || !pass) {
+      if (isProd) {
+        throw new UnauthorizedException(
+          'Webhook Basic Auth no configurado en el servidor',
+        );
+      }
+      this.logger.warn(
+        'OPENPAY_WEBHOOK_USER/PASSWORD vacíos — auth omitida (solo no-prod)',
+      );
+      return;
+    }
 
     if (!authHeader?.startsWith('Basic ')) {
       throw new UnauthorizedException('Webhook requiere Basic Auth');
     }
     const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf8');
-    const [u, p] = decoded.split(':');
-    if (u !== user || p !== (pass ?? '')) {
+    const sep = decoded.indexOf(':');
+    const u = sep >= 0 ? decoded.slice(0, sep) : decoded;
+    const p = sep >= 0 ? decoded.slice(sep + 1) : '';
+    if (u !== user || p !== pass) {
       throw new UnauthorizedException('Credenciales de webhook inválidas');
     }
   }

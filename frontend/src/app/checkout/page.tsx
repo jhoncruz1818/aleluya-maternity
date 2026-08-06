@@ -278,7 +278,7 @@ export default function CheckoutPage() {
       .validatePromoCode(token, {
         code: promoApplied,
         subtotal,
-        shippingCost: shippingBase,
+        shippingMethod: shippingId,
       })
       .then((res) => {
         if (cancelled) return;
@@ -295,7 +295,7 @@ export default function CheckoutPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subtotal, promoApplied, token]);
+  }, [subtotal, promoApplied, token, shippingId]);
 
   const applyPromo = async () => {
     if (!token) return;
@@ -310,7 +310,7 @@ export default function CheckoutPage() {
       const res = await api.validatePromoCode(token, {
         code,
         subtotal,
-        shippingCost,
+        shippingMethod: shippingId,
       });
       setPromoApplied(res.code);
       setDiscount(res.discountAmount);
@@ -393,7 +393,7 @@ export default function CheckoutPage() {
     try {
       const order = await api.createOrder(token, {
         addressId: selectedId,
-        shippingCost,
+        shippingMethod: shippingId,
         notes: noteParts.join(' · ') || undefined,
         promoCode: promoApplied || undefined,
         items: items.map((i) => ({

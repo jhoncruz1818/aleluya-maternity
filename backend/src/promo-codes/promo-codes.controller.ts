@@ -21,6 +21,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/constants/roles';
+import { resolveShippingCost } from '../orders/shipping';
 
 @ApiTags('promo-codes')
 @Controller('promo-codes')
@@ -32,10 +33,14 @@ export class PromoCodesController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Validar cupón y calcular descuento' })
   validate(@Body() dto: ValidatePromoCodeDto) {
+    const shippingCost = resolveShippingCost(
+      dto.shippingMethod ?? 'standard',
+      dto.subtotal,
+    );
     return this.promoCodesService.validatePreview(
       dto.code,
       dto.subtotal,
-      dto.shippingCost ?? 0,
+      shippingCost,
     );
   }
 

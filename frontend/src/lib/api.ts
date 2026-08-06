@@ -253,7 +253,11 @@ export const api = {
     }),
   validatePromoCode: (
     token: string,
-    body: { code: string; subtotal: number; shippingCost?: number },
+    body: {
+      code: string;
+      subtotal: number;
+      shippingMethod?: 'standard' | 'express';
+    },
   ) =>
     apiFetch<import('./types').PromoValidation>('/promo-codes/validate', {
       method: 'POST',

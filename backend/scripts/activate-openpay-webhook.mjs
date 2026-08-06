@@ -38,9 +38,18 @@ const verifyPollUrl = `${publicBase}/api/payments/webhook/openpay/last-verificat
 const merchantId = env.OPENPAY_MERCHANT_ID;
 const privateKey = env.OPENPAY_PRIVATE_KEY;
 const isProd = env.OPENPAY_PRODUCTION === 'true';
+const setupSecret = env.WEBHOOK_SETUP_SECRET || '';
 
 const openpay = new Openpay(merchantId, privateKey, isProd);
 openpay.setTimeout(30000);
+
+function setupHeaders(extra = {}) {
+  const headers = { 'Bypass-Tunnel-Reminder': 'true', ...extra };
+  if (setupSecret) {
+    headers['x-webhook-setup-secret'] = setupSecret;
+  }
+  return headers;
+}
 
 function promisify(fn) {
   return (...args) =>
@@ -61,9 +70,10 @@ async function sleep(ms) {
 
 async function probePublic() {
   try {
-    const res = await fetch(`${publicBase}/api/payments/webhook/openpay/last-verification`, {
-      headers: { 'Bypass-Tunnel-Reminder': 'true' },
-    });
+    const res = await fetch(
+      `${publicBase}/api/payments/webhook/openpay/last-verification`,
+      { headers: setupHeaders() },
+    );
     const text = await res.text();
     console.log(`Probe público HTTP ${res.status}: ${text.slice(0, 200)}`);
     return res.ok;
@@ -74,11 +84,16 @@ async function probePublic() {
 }
 
 async function waitVerification(timeoutMs = 90000) {
+  if (!setupSecret) {
+    console.warn(
+      'WEBHOOK_SETUP_SECRET vacío en .env — el endpoint de verificación puede rechazar la consulta',
+    );
+  }
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
       const res = await fetch(verifyPollUrl, {
-        headers: { 'Bypass-Tunnel-Reminder': 'true' },
+        headers: setupHeaders(),
       });
       const data = await res.json();
       if (data?.code) return data;

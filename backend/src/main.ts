@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 /**
@@ -12,23 +13,54 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
+  const isProd = config.get<string>('NODE_ENV') === 'production';
+  const frontendUrl = config.get<string>('FRONTEND_URL');
 
-  // Prefijo /api para separar claramente las rutas de la API
-  // (ej: http://localhost:3001/api/products)
+  if (isProd && !frontendUrl) {
+    throw new Error('FRONTEND_URL es obligatorio en producción (CORS)');
+  }
+
+  if (isProd) {
+    const whUser = config.get<string>('OPENPAY_WEBHOOK_USER')?.trim();
+    const whPass = config.get<string>('OPENPAY_WEBHOOK_PASSWORD')?.trim();
+    const setup = config.get<string>('WEBHOOK_SETUP_SECRET')?.trim();
+    if (!whUser || !whPass) {
+      throw new Error(
+        'OPENPAY_WEBHOOK_USER y OPENPAY_WEBHOOK_PASSWORD son obligatorios en producción',
+      );
+    }
+    if (!setup || setup.length < 16) {
+      throw new Error(
+        'WEBHOOK_SETUP_SECRET (>=16 chars) es obligatorio en producción',
+      );
+    }
+  }
+
+  const jwtSecret = config.getOrThrow<string>('JWT_SECRET');
+  if (jwtSecret.length < 32) {
+    throw new Error('JWT_SECRET debe tener al menos 32 caracteres');
+  }
+  if (/cambia-este-secreto|dev-secret/i.test(jwtSecret) && isProd) {
+    throw new Error('JWT_SECRET de desarrollo no permitido en producción');
+  }
+
+  app.use(
+    helmet({
+      // API JSON; CSP la maneja el frontend / CDN
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
+
   app.setGlobalPrefix('api');
 
-  // CORS: el frontend (Next.js en :3000) podrá llamar a esta API
   app.enableCors({
-    origin: config.get<string>('FRONTEND_URL') ?? 'http://localhost:3000',
+    origin: frontendUrl ?? 'http://localhost:3000',
     credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  /**
-   * ValidationPipe global:
-   * - whitelist: elimina campos que no estén en el DTO (seguridad)
-   * - forbidNonWhitelisted: rechaza requests con campos desconocidos
-   * - transform: convierte tipos (string → number, etc.) según el DTO
-   */
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -38,32 +70,36 @@ async function bootstrap() {
     }),
   );
 
-  // Swagger: documentación interactiva en /api/docs
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Tienda Ropa Mamá API')
-    .setDescription(
-      'API REST Aleluya Maternity. JWT + Openpay (tarjeta / Yape + webhook).',
-    )
-    .setVersion('1.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'Pega el token JWT obtenido en /api/auth/login',
-      },
-      'JWT-auth',
-    )
-    .build();
+  // Swagger solo fuera de producción (reduce superficie de ataque)
+  if (!isProd) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Tienda Ropa Mamá API')
+      .setDescription(
+        'API REST Aleluya Maternity. JWT + Openpay (tarjeta / Yape + webhook).',
+      )
+      .setVersion('1.0')
+      .addBearerAuth(
+        {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Pega el token JWT obtenido en /api/auth/login',
+        },
+        'JWT-auth',
+      )
+      .build();
 
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document);
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   const port = config.get<number>('PORT') ?? 3001;
   await app.listen(port);
 
   console.log(`API escuchando en http://localhost:${port}/api`);
-  console.log(`Swagger en http://localhost:${port}/api/docs`);
+  if (!isProd) {
+    console.log(`Swagger en http://localhost:${port}/api/docs`);
+  }
 }
 
 bootstrap();

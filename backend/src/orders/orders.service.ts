@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PromoCodesService } from '../promo-codes/promo-codes.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { resolveShippingCost } from './shipping';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { buildPaginationMeta } from '../common/dto/pagination.dto';
@@ -96,7 +97,8 @@ export class OrdersService {
       };
     });
 
-    const shippingCost = dto.shippingCost ?? 0;
+    const shippingMethod = dto.shippingMethod ?? 'standard';
+    const shippingCost = resolveShippingCost(shippingMethod, subtotal);
 
     let discountAmount = 0;
     let promoCode: string | undefined;

@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import {
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  MinLength,
+} from 'class-validator';
 
 export class ValidatePromoCodeDto {
   @ApiProperty({ example: 'ALELUYA10' })
@@ -14,10 +21,12 @@ export class ValidatePromoCodeDto {
   @Min(0)
   subtotal: number;
 
-  @ApiPropertyOptional({ example: 15, description: 'Costo de envío (PEN)' })
+  @ApiPropertyOptional({
+    enum: ['standard', 'express'],
+    description: 'Método de envío (el monto lo calcula el servidor)',
+  })
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  shippingCost?: number;
+  @IsString()
+  @IsIn(['standard', 'express'])
+  shippingMethod?: 'standard' | 'express';
 }
