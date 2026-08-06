@@ -15,6 +15,17 @@ export default function AdminHomePage() {
         </p>
       </Link>
       <Link
+        href="/admin/categorias"
+        className="border border-[var(--color-line)] p-8 transition-colors hover:border-[var(--color-ink)]"
+      >
+        <h2 className="font-[family-name:var(--font-display)] text-2xl tracking-[0.06em] text-[var(--color-ink)]">
+          Categorías
+        </h2>
+        <p className="mt-2 font-[family-name:var(--font-body)] text-sm text-[var(--color-ink-soft)]">
+          Organiza el catálogo: vestidos, enterizos, etc.
+        </p>
+      </Link>
+      <Link
         href="/admin/pedidos"
         className="border border-[var(--color-line)] p-8 transition-colors hover:border-[var(--color-ink)]"
       >

@@ -2,12 +2,10 @@ import {
   BadRequestException,
   Controller,
   Post,
-  Req,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
@@ -16,8 +14,7 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { diskStorage } from 'multer';
-import type { Request } from 'express';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -27,18 +24,13 @@ import { UploadsService } from './uploads.service';
 @ApiTags('uploads')
 @Controller('uploads')
 export class UploadsController {
-  constructor(
-    private readonly uploadsService: UploadsService,
-    private readonly config: ConfigService,
-  ) {
-    this.uploadsService.ensureDirs();
-  }
+  constructor(private readonly uploadsService: UploadsService) {}
 
   @Post('product-image')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Subir imagen de producto desde el PC (ADMIN)' })
+  @ApiOperation({ summary: 'Subir imagen de producto (ADMIN → Cloudflare R2)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -51,17 +43,7 @@ export class UploadsController {
   })
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const service = new UploadsService();
-          service.ensureDirs();
-          cb(null, service.productsDir);
-        },
-        filename: (_req, file, cb) => {
-          const service = new UploadsService();
-          cb(null, service.buildFilename(file));
-        },
-      }),
+      storage: memoryStorage(),
       limits: { fileSize: 5 * 1024 * 1024 },
       fileFilter: (_req, file, cb) => {
         const allowed = [
@@ -83,22 +65,13 @@ export class UploadsController {
       },
     }),
   )
-  uploadProductImage(
-    @UploadedFile() file: Express.Multer.File,
-    @Req() req: Request,
-  ) {
-    this.uploadsService.assertImageFile(file);
-    const configured = this.config.get<string>('PUBLIC_API_URL')?.trim();
-    const origin =
-      configured && configured.length > 0
-        ? configured.replace(/\/$/, '')
-        : `${req.protocol}://${req.get('host')}`;
-    const url = this.uploadsService.publicUrl(origin, file.filename);
+  async uploadProductImage(@UploadedFile() file: Express.Multer.File) {
+    const result = await this.uploadsService.uploadProductImage(file);
     return {
-      url,
-      filename: file.filename,
-      size: file.size,
-      mimeType: file.mimetype,
+      url: result.url,
+      filename: result.filename,
+      size: result.size,
+      mimeType: result.mimeType,
     };
   }
 }

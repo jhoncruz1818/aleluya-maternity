@@ -9,7 +9,7 @@ import { AddressesModule } from './addresses/addresses.module';
 import { OrdersModule } from './orders/orders.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PromoCodesModule } from './promo-codes/promo-codes.module';
-import { UploadsModule } from './uploads/uploads.module';
+import { UploadsModule } from './product-images/uploads.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';

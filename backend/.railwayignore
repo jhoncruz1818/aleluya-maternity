@@ -1,0 +1,8 @@
+node_modules
+dist
+coverage
+.env
+.env.*
+*.log
+# Solo archivos de disco en runtime — no el módulo Nest
+/uploads/

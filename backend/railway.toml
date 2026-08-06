@@ -1,0 +1,10 @@
+[build]
+builder = "NIXPACKS"
+# Nixpacks already runs npm ci; a second npm ci fails with EBUSY on the cache mount.
+buildCommand = "npx prisma generate && npm run build"
+
+[deploy]
+startCommand = "npm run start:prod"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"

@@ -162,7 +162,7 @@ export const api = {
       token,
       body,
     }),
-  /** Sube imagen desde el PC (multipart). Devuelve URL pública del API. */
+  /** Sube imagen desde el PC (multipart). Devuelve URL pública en R2. */
   uploadProductImage: async (token: string, file: File) => {
     const form = new FormData();
     form.append('file', file);
@@ -202,6 +202,17 @@ export const api = {
       method: 'POST',
       token,
       body,
+    }),
+  updateCategory: (token: string, id: string, body: unknown) =>
+    apiFetch<import('./types').Category>(`/categories/${id}`, {
+      method: 'PATCH',
+      token,
+      body,
+    }),
+  deleteCategory: (token: string, id: string) =>
+    apiFetch<{ message: string }>(`/categories/${id}`, {
+      method: 'DELETE',
+      token,
     }),
   getOrdersAdmin: (token: string, query?: RequestOptions['query']) =>
     apiFetch<import('./types').Paginated<import('./types').Order>>(

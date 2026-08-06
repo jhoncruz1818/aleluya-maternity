@@ -4,11 +4,13 @@ import type { NextConfig } from 'next';
  * Hosts permitidos para next/image.
  * En producción define NEXT_PUBLIC_API_HOST=tu-api.ejemplo.com
  */
-function apiUploadPatterns(): NonNullable<
-  NextConfig['images']
->['remotePatterns'] {
+type RemotePattern = NonNullable<
+  NonNullable<NextConfig['images']>['remotePatterns']
+>[number];
+
+function apiUploadPatterns(): RemotePattern[] {
   const host = (process.env.NEXT_PUBLIC_API_HOST || '').trim();
-  const patterns: NonNullable<NextConfig['images']>['remotePatterns'] = [
+  const patterns: RemotePattern[] = [
     {
       protocol: 'http',
       hostname: 'localhost',
@@ -39,6 +41,12 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { protocol: 'https', hostname: 'images.unsplash.com' },
       { protocol: 'https', hostname: 'cdn.ejemplo.com' },
+      // Cloudflare R2 — URL pública de desarrollo del bucket
+      {
+        protocol: 'https',
+        hostname: 'pub-3226721356514ef592bfae8dd2203189.r2.dev',
+        pathname: '/**',
+      },
       ...apiUploadPatterns(),
     ],
   },

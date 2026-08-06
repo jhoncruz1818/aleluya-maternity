@@ -17,5 +17,5 @@ Thumbs.db
 # Prisma
 /generated/prisma
 
-# Imágenes subidas en local (no versionar)
-/uploads
+# Imágenes subidas en local (no versionar el disco; el código vive en src/product-images)
+/uploads/

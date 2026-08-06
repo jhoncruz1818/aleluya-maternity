@@ -8,6 +8,7 @@ import { useAuthStore } from '@/store/auth';
 const nav = [
   { href: '/admin', label: 'Resumen', exact: true },
   { href: '/admin/productos', label: 'Productos' },
+  { href: '/admin/categorias', label: 'Categorías' },
   { href: '/admin/inventario', label: 'Inventario' },
   { href: '/admin/pedidos', label: 'Pedidos' },
   { href: '/admin/cupones', label: 'Cupones' },
