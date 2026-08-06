@@ -33,7 +33,8 @@ if (!publicBase) {
 }
 
 const webhookUrl = `${publicBase}/api/payments/webhook/openpay`;
-const localVerifyUrl = 'http://localhost:3001/api/payments/webhook/openpay/last-verification';
+/** Donde Openpay envía la verificación (túnel local o API en Railway). */
+const verifyPollUrl = `${publicBase}/api/payments/webhook/openpay/last-verification`;
 const merchantId = env.OPENPAY_MERCHANT_ID;
 const privateKey = env.OPENPAY_PRIVATE_KEY;
 const isProd = env.OPENPAY_PRODUCTION === 'true';
@@ -75,9 +76,15 @@ async function probePublic() {
 async function waitVerification(timeoutMs = 90000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const res = await fetch(localVerifyUrl);
-    const data = await res.json();
-    if (data?.code) return data;
+    try {
+      const res = await fetch(verifyPollUrl, {
+        headers: { 'Bypass-Tunnel-Reminder': 'true' },
+      });
+      const data = await res.json();
+      if (data?.code) return data;
+    } catch {
+      // reintento
+    }
     process.stdout.write('.');
     await sleep(2000);
   }
@@ -148,12 +155,12 @@ async function main() {
     return;
   }
 
-  console.log('Esperando verification_code en el backend local (hasta 90s)...');
+  console.log(`Esperando verification_code en ${verifyPollUrl} (hasta 90s)...`);
   const ver = await waitVerification(90000);
   console.log('');
   if (!ver?.code) {
     console.error(
-      'No llegó verification_code. Revisa que el túnel llegue a :3001 y que Openpay pueda POSTear.',
+      'No llegó verification_code. Revisa que la URL pública reciba POSTs de Openpay.',
     );
     console.log('Webhook id (para verificar a mano):', id);
     process.exit(2);

@@ -69,9 +69,23 @@ body {
 
 /* Hero — foto maternal, tono cálido y lucidez limpia */
 .hero-media {
+  /* Móvil: corazón de manos centrado (afinado tras preview) */
+  background-position: 57% 30%;
   transform: scale(1.06);
   filter: saturate(0.88) contrast(1.04) brightness(0.96);
   animation: hero-ken 22s ease-out forwards;
+}
+
+@media (min-width: 768px) {
+  .hero-media {
+    background-position: 54% 34%;
+  }
+}
+
+@media (min-width: 1024px) {
+  .hero-media {
+    background-position: 52% 35%;
+  }
 }
 
 @keyframes hero-ken {
@@ -125,7 +139,7 @@ body {
   align-items: center;
   justify-content: center;
   border: 1px solid var(--color-ink);
-  padding: 0.85rem 1.75rem;
+  padding: 0.95rem 1.75rem;
   font-family: var(--font-body), system-ui, sans-serif;
   font-size: 0.7rem;
   letter-spacing: 0.22em;
@@ -133,6 +147,12 @@ body {
   color: var(--color-ink);
   background: transparent;
   transition: background 0.35s ease, color 0.35s ease, border-color 0.35s ease;
+}
+
+@media (min-width: 640px) {
+  .btn-outline {
+    padding: 0.85rem 1.75rem;
+  }
 }
 
 .btn-outline:hover {
@@ -208,5 +228,17 @@ body {
   font-family: var(--font-body), system-ui, sans-serif;
   font-size: 0.8rem;
   color: var(--color-rose);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }
 

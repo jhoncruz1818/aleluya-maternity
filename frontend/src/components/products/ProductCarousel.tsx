@@ -28,7 +28,7 @@ export function ProductCarousel({
 
   return (
     <section className="py-16 md:py-24">
-      <div className="mx-auto flex max-w-7xl items-end justify-between px-5 md:px-8">
+      <div className="mx-auto flex max-w-7xl items-end justify-between gap-4 px-5 md:px-8">
         <div>
           <h2 className="font-[family-name:var(--font-display)] text-3xl tracking-[0.08em] text-[var(--color-ink)] md:text-4xl">
             {title}
@@ -39,7 +39,7 @@ export function ProductCarousel({
             </p>
           )}
         </div>
-        <div className="hidden gap-2 sm:flex">
+        <div className="flex shrink-0 gap-2">
           <button
             type="button"
             onClick={() => scrollBy(-1)}
@@ -66,12 +66,15 @@ export function ProductCarousel({
         {products.map((product) => (
           <div
             key={product.id}
-            className="w-[70%] shrink-0 snap-start sm:w-[42%] md:w-[28%] lg:w-[22%]"
+            className="w-[78%] shrink-0 snap-start sm:w-[42%] md:w-[28%] lg:w-[22%]"
           >
             <ProductCard product={product} />
           </div>
         ))}
       </div>
+      <p className="mt-2 px-5 font-[family-name:var(--font-body)] text-[11px] tracking-[0.14em] text-[var(--color-ink-soft)] sm:hidden">
+        Desliza para ver más →
+      </p>
     </section>
   );
 }
