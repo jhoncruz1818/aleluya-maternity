@@ -79,6 +79,14 @@ export default function LoginClient() {
           {errors.password && (
             <p className="field-error">{errors.password.message}</p>
           )}
+          <p className="mt-2 text-right">
+            <Link
+              href="/olvidaste-contrasena"
+              className="font-[family-name:var(--font-body)] text-xs text-[var(--color-ink-soft)] underline-offset-4 hover:underline"
+            >
+              ¿Olvidaste tu contraseña?
+            </Link>
+          </p>
         </div>
 
         {errors.root && <p className="field-error">{errors.root.message}</p>}
@@ -87,6 +95,16 @@ export default function LoginClient() {
           {isSubmitting ? 'Entrando…' : 'Entrar'}
         </button>
       </form>
+
+      <p className="mt-4 font-[family-name:var(--font-body)] text-xs text-[var(--color-ink-soft)]">
+        ¿No confirmaste tu email?{' '}
+        <Link
+          href="/reenviar-confirmacion"
+          className="text-[var(--color-ink)] underline-offset-4 hover:underline"
+        >
+          Reenviar enlace
+        </Link>
+      </p>
 
       <p className="mt-8 font-[family-name:var(--font-body)] text-sm text-[var(--color-ink-soft)]">
         ¿No tienes cuenta?{' '}

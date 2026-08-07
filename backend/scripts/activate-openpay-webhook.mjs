@@ -126,41 +126,65 @@ async function main() {
     console.warn('No se pudo listar webhooks:', e?.description || e?.message || e);
   }
 
-  // Si ya existe uno con la misma URL, reutilizar / verificar
-  const same = (Array.isArray(existing) ? existing : []).find(
+  const whUser = (env.OPENPAY_WEBHOOK_USER || '').trim();
+  const whPass = (env.OPENPAY_WEBHOOK_PASSWORD || '').trim();
+  if (!whUser || !whPass) {
+    console.error(
+      'Faltan OPENPAY_WEBHOOK_USER / OPENPAY_WEBHOOK_PASSWORD en .env (Basic Auth obligatorio)',
+    );
+    process.exit(1);
+  }
+  console.log('Basic Auth user configurado (password len=%d)', whPass.length);
+
+  // Borrar webhooks que apunten a esta URL (p.ej. sin Basic Auth) y recrear limpio
+  const sameUrl = (Array.isArray(existing) ? existing : []).filter(
     (w) => String(w.url || '') === webhookUrl,
   );
+  for (const w of sameUrl) {
+    console.log('Eliminando webhook viejo:', w.id, 'status=', w.status);
+    try {
+      await deleteWebhook(w.id);
+      console.log('Eliminado:', w.id);
+    } catch (e) {
+      console.error(
+        'No se pudo eliminar',
+        w.id,
+        e?.description || e?.message || e,
+      );
+      process.exit(1);
+    }
+  }
 
-  let webhook = same;
-  if (!webhook) {
-    console.log('Creando webhook...');
+  console.log('Creando webhook con Basic Auth...');
+  let webhook;
+  try {
+    webhook = await createWebhook({
+      url: webhookUrl,
+      user: whUser,
+      password: whPass,
+      event_types: [
+        'charge.succeeded',
+        'charge.failed',
+        'charge.cancelled',
+        'charge.created',
+        'verification',
+      ],
+    });
+    console.log('Webhook creado:', JSON.stringify(webhook, null, 2));
+  } catch (e) {
+    console.error('Error al crear webhook:', JSON.stringify(e, null, 2));
+    // Algunas cuentas PE no aceptan event_types; reintentar con user/pass sí
     try {
       webhook = await createWebhook({
         url: webhookUrl,
-        user: env.OPENPAY_WEBHOOK_USER || undefined,
-        password: env.OPENPAY_WEBHOOK_PASSWORD || undefined,
-        event_types: [
-          'charge.succeeded',
-          'charge.failed',
-          'charge.cancelled',
-          'charge.created',
-          'verification',
-        ],
+        user: whUser,
+        password: whPass,
       });
-      console.log('Webhook creado:', JSON.stringify(webhook, null, 2));
-    } catch (e) {
-      console.error('Error al crear webhook:', JSON.stringify(e, null, 2));
-      // Intentar sin event_types (algunas cuentas PE usan defaults)
-      try {
-        webhook = await createWebhook({ url: webhookUrl });
-        console.log('Webhook creado (mínimo):', JSON.stringify(webhook, null, 2));
-      } catch (e2) {
-        console.error('Error create mínimo:', JSON.stringify(e2, null, 2));
-        process.exit(1);
-      }
+      console.log('Webhook creado (sin event_types):', JSON.stringify(webhook, null, 2));
+    } catch (e2) {
+      console.error('Error create con Basic Auth:', JSON.stringify(e2, null, 2));
+      process.exit(1);
     }
-  } else {
-    console.log('Ya existe webhook con esa URL:', webhook.id, 'status=', webhook.status);
   }
 
   const id = String(webhook.id || '');

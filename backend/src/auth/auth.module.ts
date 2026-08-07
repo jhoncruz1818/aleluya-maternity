@@ -6,6 +6,7 @@ import type { StringValue } from 'ms';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { MailModule } from '../mail/mail.module';
 
 /**
  * AuthModule: registra Passport + JWT y expone AuthService
@@ -13,15 +14,14 @@ import { JwtStrategy } from './strategies/jwt.strategy';
  */
 @Module({
   imports: [
+    MailModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
-    // registerAsync: lee JWT_SECRET y JWT_EXPIRES_IN desde .env
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: config.getOrThrow<string>('JWT_SECRET'),
         signOptions: {
-          // StringValue tipa valores como "7d", "24h" (paquete `ms` que usa jsonwebtoken)
           expiresIn: (config.get<string>('JWT_EXPIRES_IN') ?? '7d') as StringValue,
         },
       }),

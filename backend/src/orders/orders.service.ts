@@ -21,6 +21,7 @@ import {
   StockMoveType,
 } from '../common/constants/stock';
 import { InventoryService } from '../inventory/inventory.service';
+import { PaymentsService } from '../payments/payments.service';
 
 const orderInclude = {
   items: {
@@ -39,6 +40,7 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly promoCodesService: PromoCodesService,
     private readonly inventoryService: InventoryService,
+    private readonly paymentsService: PaymentsService,
   ) {}
 
   /**
@@ -289,6 +291,10 @@ export class OrdersService {
     return { data, meta: buildPaginationMeta(total, page, limit) };
   }
 
+  getOpenpayGate(id: string) {
+    return this.paymentsService.getOpenpayPaymentGate(id);
+  }
+
   async updateStatus(id: string, dto: UpdateOrderStatusDto) {
     const order = await this.prisma.order.findUnique({
       where: { id },
@@ -298,9 +304,27 @@ export class OrdersService {
       throw new NotFoundException('Pedido no encontrado');
     }
 
+    // PENDING/PAID deben coincidir con Openpay; logística es libre
+    if (
+      dto.status === OrderStatus.PENDING ||
+      dto.status === OrderStatus.PAID
+    ) {
+      const gate = await this.paymentsService.getOpenpayPaymentGate(id);
+      if (dto.status === OrderStatus.PAID && !gate.allowPaid) {
+        throw new BadRequestException(
+          `No puedes marcar PAID: Openpay no confirma el pago` +
+            (gate.openpayStatus ? ` (estado: ${gate.openpayStatus})` : ''),
+        );
+      }
+      if (dto.status === OrderStatus.PENDING && !gate.allowPending) {
+        throw new BadRequestException(
+          'No puedes marcar PENDING: Openpay ya confirmó el pago (COMPLETED)',
+        );
+      }
+    }
+
     return this.prisma.$transaction(async (tx) => {
-      // Si el admin marca PAID (p.ej. simular Yape en sandbox),
-      // también aprobamos el pago pendiente.
+      // Solo alinear Payment.APPROVED si Openpay ya confirmó (validado arriba)
       if (dto.status === OrderStatus.PAID && order.payment) {
         await tx.payment.update({
           where: { id: order.payment.id },

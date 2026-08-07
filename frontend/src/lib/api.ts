@@ -93,12 +93,36 @@ export const api = {
     apiFetch<import('./types').Product>(`/products/${idOrSlug}`),
 
   register: (body: unknown) =>
-    apiFetch<import('./types').AuthResponse>('/auth/register', {
+    apiFetch<{
+      message: string;
+      email: string;
+      requiresEmailVerification: boolean;
+    }>('/auth/register', {
       method: 'POST',
       body,
     }),
   login: (body: unknown) =>
     apiFetch<import('./types').AuthResponse>('/auth/login', {
+      method: 'POST',
+      body,
+    }),
+  verifyEmail: (body: { token: string }) =>
+    apiFetch<{ message: string }>('/auth/verify-email', {
+      method: 'POST',
+      body,
+    }),
+  resendVerification: (body: { email: string }) =>
+    apiFetch<{ message: string }>('/auth/resend-verification', {
+      method: 'POST',
+      body,
+    }),
+  forgotPassword: (body: { email: string }) =>
+    apiFetch<{ message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body,
+    }),
+  resetPassword: (body: { token: string; password: string }) =>
+    apiFetch<{ message: string }>('/auth/reset-password', {
       method: 'POST',
       body,
     }),
@@ -225,6 +249,15 @@ export const api = {
       token,
       body: { status },
     }),
+  getOrderOpenpayGate: (token: string, orderId: string) =>
+    apiFetch<{
+      orderId: string;
+      hasCharge: boolean;
+      openpayStatus: string | null;
+      paymentConfirmed: boolean;
+      allowPending: boolean;
+      allowPaid: boolean;
+    }>(`/orders/${orderId}/openpay-gate`, { token }),
   syncPayment: (token: string, orderId: string) =>
     apiFetch<{
       message: string;

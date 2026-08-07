@@ -224,6 +224,60 @@ export class PaymentsService {
   }
 
   /**
+   * Fuente de verdad Openpay para restringir PENDING/PAID en admin.
+   * Fail-closed: si hay cargo pero no se puede consultar, lanza error.
+   */
+  async getOpenpayPaymentGate(orderId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { payment: true },
+    });
+    if (!order) throw new NotFoundException('Pedido no encontrado');
+
+    const chargeId = order.payment?.openpayChargeId ?? null;
+    if (!chargeId) {
+      return {
+        orderId,
+        hasCharge: false,
+        openpayStatus: null as string | null,
+        paymentConfirmed: false,
+        allowPending: true,
+        allowPaid: false,
+      };
+    }
+
+    if (!this.openpay.isConfigured()) {
+      throw new ServiceUnavailableException(
+        'Openpay no está configurado; no se puede validar el pago',
+      );
+    }
+
+    let charge;
+    try {
+      charge = await this.openpay.getCharge(chargeId);
+    } catch (err) {
+      const e = err as OpenpayError;
+      throw new BadRequestException(
+        e?.description ||
+          e?.message ||
+          'No se pudo consultar el cargo en Openpay',
+      );
+    }
+
+    const openpayStatus = String(charge.status || '').toUpperCase() || null;
+    const paymentConfirmed = openpayStatus === 'COMPLETED';
+
+    return {
+      orderId,
+      hasCharge: true,
+      openpayStatus,
+      paymentConfirmed,
+      allowPending: !paymentConfirmed,
+      allowPaid: paymentConfirmed,
+    };
+  }
+
+  /**
    * Consulta el cargo en Openpay y, si ya está COMPLETED, marca el pedido pagado.
    * Útil si el webhook se retrasó; no simula el pago.
    */

@@ -68,6 +68,17 @@ export class OrdersController {
     return this.ordersService.findAllAdmin(query);
   }
 
+  @Get(':id/openpay-gate')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary:
+      'Consulta Openpay para saber si PENDING/PAID están seleccionables (ADMIN)',
+  })
+  openpayGate(@Param('id') id: string) {
+    return this.ordersService.getOpenpayGate(id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Detalle de un pedido propio' })
   findOne(

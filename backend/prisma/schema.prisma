@@ -36,6 +36,8 @@ model User {
   lastName  String
   phone     String?
   role      String   @default("CLIENT")
+  // null = pendiente de confirmar el correo
+  emailVerifiedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -43,6 +45,43 @@ model User {
   orders    Order[]
   stockMovementsCreated StockMovement[] @relation("StockMovementCreatedBy")
   stockMovementsUndone  StockMovement[] @relation("StockMovementUndoneBy")
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+}
+
+// -----------------------------------------------------------------------------
+// PasswordResetToken: enlace de un solo uso para recuperar contraseña
+// Guardamos hash del token (nunca el valor en claro)
+// -----------------------------------------------------------------------------
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// -----------------------------------------------------------------------------
+// EmailVerificationToken: confirmar que el email del registro es real
+// -----------------------------------------------------------------------------
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // -----------------------------------------------------------------------------

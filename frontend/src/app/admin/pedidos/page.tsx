@@ -14,27 +14,75 @@ const STATUSES = [
   'CANCELLED',
 ] as const;
 
+type OpenpayGate = {
+  orderId: string;
+  hasCharge: boolean;
+  openpayStatus: string | null;
+  paymentConfirmed: boolean;
+  allowPending: boolean;
+  allowPaid: boolean;
+};
+
 export default function AdminPedidosPage() {
   const token = useAuthStore((s) => s.token)!;
   const [orders, setOrders] = useState<Order[]>([]);
+  const [gates, setGates] = useState<Record<string, OpenpayGate>>({});
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  const loadGates = useCallback(
+    async (list: Order[]) => {
+      const entries = await Promise.all(
+        list.map(async (order) => {
+          try {
+            const gate = await api.getOrderOpenpayGate(token, order.id);
+            return [order.id, gate] as const;
+          } catch {
+            // Fail-closed en UI: sin confirmación Openpay no ofrecer PAID
+            return [
+              order.id,
+              {
+                orderId: order.id,
+                hasCharge: Boolean(order.payment?.openpayChargeId),
+                openpayStatus: null,
+                paymentConfirmed: false,
+                allowPending: true,
+                allowPaid: false,
+              } satisfies OpenpayGate,
+            ] as const;
+          }
+        }),
+      );
+      setGates(Object.fromEntries(entries));
+    },
+    [token],
+  );
 
   const load = useCallback(async () => {
     try {
       const res = await api.getOrdersAdmin(token, { limit: 50 });
       setOrders(res.data);
       setError(null);
+      await loadGates(res.data);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Error al cargar');
     }
-  }, [token]);
+  }, [token, loadGates]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  const isStatusDisabled = (orderId: string, status: string) => {
+    const gate = gates[orderId];
+    if (!gate) return status === 'PENDING' || status === 'PAID';
+    if (status === 'PENDING') return !gate.allowPending;
+    if (status === 'PAID') return !gate.allowPaid;
+    return false;
+  };
+
   const changeStatus = async (id: string, status: string) => {
+    if (isStatusDisabled(id, status)) return;
     setBusyId(id);
     try {
       await api.updateOrderStatus(token, id, status);
@@ -70,72 +118,88 @@ export default function AdminPedidosPage() {
           POST /api/payments/webhook/openpay
         </code>
         ). “Sincronizar” consulta el cargo en Openpay si el webhook se retrasó.
+        PENDING/PAID se bloquean según el estado real en Openpay.
       </p>
 
       {error && <p className="mt-4 field-error">{error}</p>}
 
       <ul className="mt-8 space-y-6">
-        {orders.map((order) => (
-          <li
-            key={order.id}
-            className="border-b border-[var(--color-line)] pb-6"
-          >
-            <div className="flex flex-wrap items-baseline justify-between gap-3">
-              <div>
-                <p className="font-[family-name:var(--font-display)] text-xl text-[var(--color-ink)]">
-                  {formatPrice(order.total)}
-                </p>
-                <p className="mt-1 font-[family-name:var(--font-body)] text-xs text-[var(--color-ink-soft)]">
-                  {new Date(order.createdAt).toLocaleString('es-PE')} ·{' '}
-                  {order.user?.email ?? 'cliente'}
-                </p>
-                <p className="mt-1 font-[family-name:var(--font-body)] text-[10px] text-[var(--color-ink-soft)]">
-                  {order.id}
-                </p>
+        {orders.map((order) => {
+          const gate = gates[order.id];
+          return (
+            <li
+              key={order.id}
+              className="border-b border-[var(--color-line)] pb-6"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-3">
+                <div>
+                  <p className="font-[family-name:var(--font-display)] text-xl text-[var(--color-ink)]">
+                    {formatPrice(order.total)}
+                  </p>
+                  <p className="mt-1 font-[family-name:var(--font-body)] text-xs text-[var(--color-ink-soft)]">
+                    {new Date(order.createdAt).toLocaleString('es-PE')} ·{' '}
+                    {order.user?.email ?? 'cliente'}
+                  </p>
+                  <p className="mt-1 font-[family-name:var(--font-body)] text-[10px] text-[var(--color-ink-soft)]">
+                    {order.id}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="field-label mb-0">Estado</label>
+                  <select
+                    className="field-input w-auto py-2"
+                    value={order.status}
+                    disabled={busyId === order.id}
+                    onChange={(e) => changeStatus(order.id, e.target.value)}
+                  >
+                    {STATUSES.map((s) => {
+                      const disabled = isStatusDisabled(order.id, s);
+                      return (
+                        <option
+                          key={s}
+                          value={s}
+                          disabled={disabled}
+                          className={disabled ? 'text-neutral-400' : undefined}
+                        >
+                          {s}
+                          {disabled ? ' (bloqueado)' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="field-label mb-0">Estado</label>
-                <select
-                  className="field-input w-auto py-2"
-                  value={order.status}
-                  disabled={busyId === order.id}
-                  onChange={(e) => changeStatus(order.id, e.target.value)}
-                >
-                  {STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {order.payment && (
-              <div className="mt-3 space-y-2">
-                <p className="font-[family-name:var(--font-body)] text-xs text-[var(--color-ink-soft)]">
-                  Pago: {order.payment.status}
-                  {order.payment.method ? ` · ${order.payment.method}` : ''} ·{' '}
-                  {formatPrice(order.payment.amount)}
-                  {order.payment.paymentReference
-                    ? ` · ref ${order.payment.paymentReference}`
-                    : ''}
-                </p>
-                {order.payment.status === 'PENDING' &&
-                  order.payment.openpayChargeId && (
-                    <button
-                      type="button"
-                      disabled={busyId === order.id}
-                      onClick={() => syncPayment(order.id)}
-                      className="font-[family-name:var(--font-body)] text-[11px] uppercase tracking-[0.16em] text-[var(--color-ink)] underline-offset-4 hover:underline disabled:opacity-40"
-                    >
-                      Sincronizar con Openpay
-                    </button>
-                  )}
-              </div>
-            )}
-          </li>
-        ))}
+              {order.payment && (
+                <div className="mt-3 space-y-2">
+                  <p className="font-[family-name:var(--font-body)] text-xs text-[var(--color-ink-soft)]">
+                    Pago: {order.payment.status}
+                    {order.payment.method ? ` · ${order.payment.method}` : ''} ·{' '}
+                    {formatPrice(order.payment.amount)}
+                    {order.payment.paymentReference
+                      ? ` · ref ${order.payment.paymentReference}`
+                      : ''}
+                    {gate?.openpayStatus
+                      ? ` · Openpay ${gate.openpayStatus}`
+                      : ''}
+                  </p>
+                  {order.payment.status === 'PENDING' &&
+                    order.payment.openpayChargeId && (
+                      <button
+                        type="button"
+                        disabled={busyId === order.id}
+                        onClick={() => syncPayment(order.id)}
+                        className="font-[family-name:var(--font-body)] text-[11px] uppercase tracking-[0.16em] text-[var(--color-ink)] underline-offset-4 hover:underline disabled:opacity-40"
+                      >
+                        Sincronizar con Openpay
+                      </button>
+                    )}
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
 
       {orders.length === 0 && !error && (
