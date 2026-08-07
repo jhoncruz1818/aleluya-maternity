@@ -61,7 +61,7 @@ export async function apiFetch<T>(
   };
 
   if (typeof window === 'undefined' && method === 'GET') {
-    init.next = { revalidate: 60 };
+    init.next = { revalidate: 120 };
   }
 
   const res = await fetch(buildUrl(path, query), init);

@@ -21,25 +21,20 @@ export const metadata: Metadata = {
  */
 export default async function HomePage() {
   let featured = { data: [] as Awaited<ReturnType<typeof api.getProducts>>['data'] };
+  let recent = { data: [] as Awaited<ReturnType<typeof api.getProducts>>['data'] };
   let categories: Awaited<ReturnType<typeof api.getCategories>> = [];
 
   try {
-    [featured, categories] = await Promise.all([
+    [featured, recent, categories] = await Promise.all([
       api.getProducts({ isFeatured: true, limit: 8 }),
+      api.getProducts({ limit: 8 }),
       api.getCategories(),
     ]);
   } catch {
     // Si la API está caída, la home sigue renderizando el hero
   }
 
-  // Fallback: si no hay destacados, mostramos el catálogo reciente
-  if (!featured.data.length) {
-    try {
-      featured = await api.getProducts({ limit: 8 });
-    } catch {
-      /* ignore */
-    }
-  }
+  const carousel = featured.data.length ? featured.data : recent.data;
 
   return (
     <>
@@ -49,7 +44,7 @@ export default async function HomePage() {
           className="hero-media absolute inset-0 bg-cover"
           style={{
             backgroundImage:
-              "url('https://images.unsplash.com/photo-1493894473891-10fc1e5dbd22?auto=format&fit=crop&w=2200&q=85')",
+              "url('https://images.unsplash.com/photo-1493894473891-10fc1e5dbd22?auto=format&fit=crop&w=1400&q=75')",
           }}
           role="img"
           aria-label="Mamá gestante con las manos en forma de corazón sobre la pancita"
@@ -122,7 +117,7 @@ export default async function HomePage() {
       )}
 
       <ProductCarousel
-        products={featured.data}
+        products={carousel}
         title="Selección"
         subtitle="Piezas que recomendamos esta temporada."
       />

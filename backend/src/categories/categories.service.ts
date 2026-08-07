@@ -8,6 +8,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { slugify } from '../common/utils/slugify';
+import {
+  PUBLIC_LIST_TTL_MS,
+  categoriesCache,
+} from '../common/utils/ttl-cache';
 
 @Injectable()
 export class CategoriesService {
@@ -18,16 +22,30 @@ export class CategoriesService {
 
     await this.ensureUnique(dto.name, slug);
 
-    return this.prisma.category.create({
+    const created = await this.prisma.category.create({
       data: {
         name: dto.name.trim(),
         slug,
         description: dto.description,
       },
     });
+    categoriesCache.invalidatePrefix('categories:');
+    return created;
   }
 
-  findAll() {
+  async findAll() {
+    const cacheKey = 'categories:list';
+    const cached = categoriesCache.get<
+      Awaited<ReturnType<CategoriesService['findAllUncached']>>
+    >(cacheKey);
+    if (cached) return cached;
+
+    const data = await this.findAllUncached();
+    categoriesCache.set(cacheKey, data, PUBLIC_LIST_TTL_MS);
+    return data;
+  }
+
+  private findAllUncached() {
     return this.prisma.category.findMany({
       orderBy: { name: 'asc' },
       include: {
@@ -66,7 +84,7 @@ export class CategoriesService {
       await this.ensureUnique(dto.name, slug, id);
     }
 
-    return this.prisma.category.update({
+    const updated = await this.prisma.category.update({
       where: { id },
       data: {
         name: dto.name?.trim(),
@@ -74,6 +92,8 @@ export class CategoriesService {
         description: dto.description,
       },
     });
+    categoriesCache.invalidatePrefix('categories:');
+    return updated;
   }
 
   async remove(id: string) {
@@ -87,6 +107,7 @@ export class CategoriesService {
     }
 
     await this.prisma.category.delete({ where: { id } });
+    categoriesCache.invalidatePrefix('categories:');
     return { message: 'Categoría eliminada' };
   }
 

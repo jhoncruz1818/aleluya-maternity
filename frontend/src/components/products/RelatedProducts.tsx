@@ -19,26 +19,23 @@ async function loadRelatedProducts(product: Product): Promise<Product[]> {
   const selected: Product[] = [];
 
   try {
-    if (product.category?.slug || product.categoryId) {
-      const sameCat = await api.getProducts({
-        category: product.category?.slug,
-        page: 1,
-        limit: 12,
-      });
-      selected.push(
-        ...excludeAndDedupe(sameCat.data, product.id, selected).slice(
-          0,
-          TARGET_MAX,
-        ),
-      );
-    }
+    const categorySlug = product.category?.slug;
+    const [sameCat, featured, recent] = await Promise.all([
+      categorySlug
+        ? api.getProducts({ category: categorySlug, page: 1, limit: 12 })
+        : Promise.resolve({ data: [] as Product[] }),
+      api.getProducts({ isFeatured: true, page: 1, limit: 12 }),
+      api.getProducts({ page: 1, limit: 12 }),
+    ]);
+
+    selected.push(
+      ...excludeAndDedupe(sameCat.data, product.id, selected).slice(
+        0,
+        TARGET_MAX,
+      ),
+    );
 
     if (selected.length < TARGET_MIN) {
-      const featured = await api.getProducts({
-        isFeatured: true,
-        page: 1,
-        limit: 12,
-      });
       selected.push(
         ...excludeAndDedupe(featured.data, product.id, selected).slice(
           0,
@@ -48,7 +45,6 @@ async function loadRelatedProducts(product: Product): Promise<Product[]> {
     }
 
     if (selected.length < TARGET_MIN) {
-      const recent = await api.getProducts({ page: 1, limit: 12 });
       selected.push(
         ...excludeAndDedupe(recent.data, product.id, selected).slice(
           0,
@@ -65,7 +61,7 @@ async function loadRelatedProducts(product: Product): Promise<Product[]> {
 
 /**
  * Productos de la misma categoría (o fallback destacados/recientes).
- * Usa ProductCard con Link real hacia cada PDP.
+ * Pensado para ir dentro de <Suspense> y no bloquear el PDP.
  */
 export async function RelatedProducts({ product }: { product: Product }) {
   const related = await loadRelatedProducts(product);

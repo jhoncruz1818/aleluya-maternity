@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 import { formatPrice } from '@/lib/types';
@@ -139,7 +140,9 @@ export default async function ProductDetailPage({ params }: Props) {
         </div>
       </div>
 
-      <RelatedProducts product={product} />
+      <Suspense fallback={null}>
+        <RelatedProducts product={product} />
+      </Suspense>
     </div>
   );
 }

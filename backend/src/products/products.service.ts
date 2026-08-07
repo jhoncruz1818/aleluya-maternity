@@ -16,12 +16,23 @@ import {
   StockMoveType,
 } from '../common/constants/stock';
 import { InventoryService } from '../inventory/inventory.service';
+import {
+  PUBLIC_DETAIL_TTL_MS,
+  PUBLIC_LIST_TTL_MS,
+  productsCache,
+} from '../common/utils/ttl-cache';
 
 /** Includes típicos al devolver un producto completo */
 const productInclude = {
   category: true,
   images: { orderBy: { sortOrder: 'asc' as const } },
   variants: true,
+} satisfies Prisma.ProductInclude;
+
+/** Listado público: sin variantes (las tarjetas no las usan). */
+const publicListInclude = {
+  category: true,
+  images: { orderBy: { sortOrder: 'asc' as const }, take: 1 },
 } satisfies Prisma.ProductInclude;
 
 @Injectable()
@@ -39,7 +50,7 @@ export class ProductsService {
     this.validatePrices(dto.price, dto.discountPrice);
     await this.ensureSkusUnique(dto.variants.map((v) => v.sku));
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
         data: {
           name: dto.name.trim(),
@@ -87,6 +98,9 @@ export class ProductsService {
 
       return product;
     });
+
+    this.bustPublicProductCache();
+    return created;
   }
 
   /**
@@ -97,6 +111,24 @@ export class ProductsService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 12;
     const skip = (page - 1) * limit;
+
+    const cacheKey = !forAdmin
+      ? `products:list:${JSON.stringify({
+          page,
+          limit,
+          isFeatured: query.isFeatured ?? null,
+          search: query.search ?? null,
+          category: query.category ?? null,
+        })}`
+      : null;
+
+    if (cacheKey) {
+      const cached = productsCache.get<{
+        data: unknown;
+        meta: ReturnType<typeof buildPaginationMeta>;
+      }>(cacheKey);
+      if (cached) return cached;
+    }
 
     const where: Prisma.ProductWhereInput = {};
 
@@ -125,28 +157,44 @@ export class ProductsService {
       };
     }
 
-    const [total, data] = await this.prisma.$transaction([
+    const [total, data] = await Promise.all([
       this.prisma.product.count({ where }),
       this.prisma.product.findMany({
         where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: {
-          category: true,
-          images: { orderBy: { sortOrder: 'asc' }, take: 1 },
-          variants: true,
-        },
+        include: forAdmin
+          ? {
+              category: true,
+              images: { orderBy: { sortOrder: 'asc' }, take: 1 },
+              variants: true,
+            }
+          : publicListInclude,
       }),
     ]);
 
-    return {
+    const result = {
       data,
       meta: buildPaginationMeta(total, page, limit),
     };
+
+    if (cacheKey) {
+      productsCache.set(cacheKey, result, PUBLIC_LIST_TTL_MS);
+    }
+
+    return result;
   }
 
   async findOne(idOrSlug: string, forAdmin = false) {
+    const cacheKey = !forAdmin ? `products:one:${idOrSlug}` : null;
+    if (cacheKey) {
+      const cached = productsCache.get<
+        Prisma.ProductGetPayload<{ include: typeof productInclude }>
+      >(cacheKey);
+      if (cached) return cached;
+    }
+
     const product = await this.prisma.product.findFirst({
       where: {
         OR: [{ id: idOrSlug }, { slug: idOrSlug }],
@@ -159,7 +207,15 @@ export class ProductsService {
       throw new NotFoundException('Producto no encontrado');
     }
 
+    if (cacheKey) {
+      productsCache.set(cacheKey, product, PUBLIC_DETAIL_TTL_MS);
+    }
+
     return product;
+  }
+
+  private bustPublicProductCache() {
+    productsCache.invalidatePrefix('products:');
   }
 
   async update(id: string, dto: UpdateProductDto) {
@@ -199,7 +255,7 @@ export class ProductsService {
     }
 
     // Transacción: si reemplazamos imágenes/variantes, borramos las viejas primero
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       if (dto.images) {
         await tx.productImage.deleteMany({ where: { productId: id } });
       }
@@ -241,6 +297,9 @@ export class ProductsService {
         include: productInclude,
       });
     });
+
+    this.bustPublicProductCache();
+    return updated;
   }
 
   /**
@@ -255,6 +314,7 @@ export class ProductsService {
       data: { isActive: false },
     });
 
+    this.bustPublicProductCache();
     return { message: 'Producto desactivado (soft-delete)' };
   }
 
