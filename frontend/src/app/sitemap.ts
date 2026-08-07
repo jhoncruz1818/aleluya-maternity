@@ -10,7 +10,7 @@ async function allActiveProductSlugs(): Promise<
   let totalPages = 1;
 
   do {
-    const res = await api.getProducts({ page, limit: 100 });
+    const res = await api.getProducts({ page, limit: 50 });
     for (const p of res.data) {
       slugs.push({
         slug: p.slug,
@@ -23,6 +23,9 @@ async function allActiveProductSlugs(): Promise<
 
   return slugs;
 }
+
+/** Regenerar en runtime para no cachear un sitemap vacío si la API falló en build. */
+export const revalidate = 60;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const site = getSiteUrl();
