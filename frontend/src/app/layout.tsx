@@ -5,6 +5,7 @@ import { Footer } from '@/components/layout/Footer';
 import { WhatsAppFab } from '@/components/layout/WhatsAppFab';
 import { QueryProvider } from '@/components/providers/QueryProvider';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
+import { getSiteUrl } from '@/lib/site';
 import './globals.css';
 
 const display = Cormorant_Garamond({
@@ -20,6 +21,7 @@ const body = Outfit({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(getSiteUrl()),
   title: {
     default: 'Aleluya Maternity — Ropa para mamá',
     template: '%s · Aleluya Maternity',
@@ -30,15 +32,34 @@ export const metadata: Metadata = {
 
 const themeInitScript = `(function(){try{var t=localStorage.getItem('aleluya-theme');if(t!=='dark'&&t!=='light'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.setAttribute('data-theme',t)}catch(e){}})();`;
 
+function organizationJsonLd() {
+  const site = getSiteUrl();
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Organization',
+    name: 'Aleluya Maternity',
+    url: site,
+    description:
+      'Vestidos y enterizos de fiesta para mamá. Colección Aleluya Maternity.',
+    logo: `${site}/favicon.ico`,
+  };
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const orgLd = organizationJsonLd();
+
   return (
     <html lang="es" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(orgLd) }}
+        />
       </head>
       <body
         className={`${display.variable} ${body.variable} flex min-h-screen flex-col antialiased`}

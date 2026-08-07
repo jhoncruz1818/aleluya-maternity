@@ -28,7 +28,7 @@ export function Footer() {
             </li>
             <li>
               <Link
-                href="/productos?category=vestidos-cortos"
+                href="/categorias/vestidos-cortos"
                 className="hover:text-[var(--color-ink)]"
               >
                 Vestidos cortos
@@ -36,7 +36,7 @@ export function Footer() {
             </li>
             <li>
               <Link
-                href="/productos?category=vestidos-largos"
+                href="/categorias/vestidos-largos"
                 className="hover:text-[var(--color-ink)]"
               >
                 Vestidos largos
@@ -44,7 +44,7 @@ export function Footer() {
             </li>
             <li>
               <Link
-                href="/productos?category=enterizos-maternos"
+                href="/categorias/enterizos-maternos"
                 className="hover:text-[var(--color-ink)]"
               >
                 Enterizos

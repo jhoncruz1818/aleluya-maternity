@@ -1,6 +1,19 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { api } from '@/lib/api';
 import { ProductCarousel } from '@/components/products/ProductCarousel';
+
+export const metadata: Metadata = {
+  title: 'Inicio',
+  description:
+    'Aleluya Maternity: vestidos y enterizos de fiesta para mamá. Descubre la colección 2026 y compra online en Perú.',
+  openGraph: {
+    title: 'Aleluya Maternity — Ropa para mamá',
+    description:
+      'Vestidos y enterizos de fiesta para mamá. Colección 2026.',
+    type: 'website',
+  },
+};
 
 /**
  * Home — una sola composición en el primer viewport:
@@ -89,7 +102,7 @@ export default async function HomePage() {
               {categories.map((cat) => (
                 <li key={cat.id}>
                   <Link
-                    href={`/productos?category=${cat.slug}`}
+                    href={`/categorias/${cat.slug}`}
                     className="group block border-b border-[var(--color-line)] pb-4 transition-colors hover:border-[var(--color-rose)]"
                   >
                     <span className="font-[family-name:var(--font-display)] text-2xl tracking-[0.06em] text-[var(--color-ink)] group-hover:text-[var(--color-rose)]">

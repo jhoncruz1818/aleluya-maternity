@@ -5,6 +5,8 @@ import { api, ApiError } from '@/lib/api';
 import { formatPrice } from '@/lib/types';
 import { ProductGallery } from '@/components/products/ProductGallery';
 import { AddToCartPanel } from '@/components/products/AddToCartPanel';
+import { RelatedProducts } from '@/components/products/RelatedProducts';
+import { getSiteUrl } from '@/lib/site';
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -51,12 +53,50 @@ export default async function ProductDetailPage({ params }: Props) {
 
   if (!product) notFound();
 
-  const price = product.discountPrice ?? product.price;
+  const price = Number(product.discountPrice ?? product.price);
+  const stockTotal = (product.variants ?? []).reduce(
+    (sum, v) => sum + (v.stock ?? 0),
+    0,
+  );
+  const inStock = stockTotal > 0;
+  const site = getSiteUrl();
+  const productUrl = `${site}/productos/${encodeURIComponent(product.slug)}`;
+  const images = (product.images ?? []).map((img) => img.url).filter(Boolean);
+
+  const productLd = {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: product.name,
+    description: product.description,
+    image: images.length ? images : undefined,
+    sku: product.variants?.[0]?.sku,
+    brand: {
+      '@type': 'Brand',
+      name: 'Aleluya Maternity',
+    },
+    offers: {
+      '@type': 'Offer',
+      url: productUrl,
+      priceCurrency: 'PEN',
+      price: price.toFixed(2),
+      availability: inStock
+        ? 'https://schema.org/InStock'
+        : 'https://schema.org/OutOfStock',
+      itemCondition: 'https://schema.org/NewCondition',
+    },
+  };
 
   return (
     <div className="pt-24 md:pt-28">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(productLd) }}
+      />
       <div className="mx-auto grid max-w-7xl gap-10 px-5 pb-20 md:grid-cols-2 md:gap-14 md:px-8 lg:gap-20">
-        <ProductGallery images={product.images ?? []} productName={product.name} />
+        <ProductGallery
+          images={product.images ?? []}
+          productName={product.name}
+        />
 
         <div className="flex flex-col md:pt-4">
           <nav className="font-[family-name:var(--font-body)] text-[11px] uppercase tracking-[0.18em] text-[var(--color-ink-soft)]">
@@ -67,7 +107,7 @@ export default async function ProductDetailPage({ params }: Props) {
               <>
                 <span className="mx-2">/</span>
                 <Link
-                  href={`/productos?category=${product.category.slug}`}
+                  href={`/categorias/${product.category.slug}`}
                   className="hover:text-[var(--color-ink)]"
                 >
                   {product.category.name}
@@ -98,6 +138,8 @@ export default async function ProductDetailPage({ params }: Props) {
           </div>
         </div>
       </div>
+
+      <RelatedProducts product={product} />
     </div>
   );
 }

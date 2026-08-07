@@ -1,9 +1,21 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { api } from '@/lib/api';
 import { ProductCard } from '@/components/products/ProductCard';
 
+export const metadata: Metadata = {
+  title: 'Colección',
+  description:
+    'Explora la colección Aleluya Maternity: vestidos cortos, largos y enterizos maternos. Filtra por categoría y encuentra tu look.',
+  openGraph: {
+    title: 'Colección · Aleluya Maternity',
+    description:
+      'Catálogo de vestidos y enterizos para mamá. Compra online.',
+    type: 'website',
+  },
+};
+
 type SearchParams = Promise<{
-  category?: string;
   search?: string;
   featured?: string;
   page?: string;
@@ -32,7 +44,6 @@ export default async function ProductosPage({
     [categories, products] = await Promise.all([
       api.getCategories(),
       api.getProducts({
-        category: params.category,
         search: params.search,
         isFeatured: params.featured === '1' ? true : undefined,
         page,
@@ -46,7 +57,6 @@ export default async function ProductosPage({
   const buildHref = (overrides: Record<string, string | undefined>) => {
     const q = new URLSearchParams();
     const merged = {
-      category: params.category,
       search: params.search,
       featured: params.featured,
       page: undefined as string | undefined,
@@ -77,9 +87,6 @@ export default async function ProductosPage({
           method="get"
           className="mt-10 flex flex-col gap-3 sm:flex-row sm:items-center"
         >
-          {params.category && (
-            <input type="hidden" name="category" value={params.category} />
-          )}
           {params.featured && (
             <input type="hidden" name="featured" value={params.featured} />
           )}
@@ -98,23 +105,15 @@ export default async function ProductosPage({
         <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3">
           <Link
             href="/productos"
-            className={`font-[family-name:var(--font-body)] text-[11px] uppercase tracking-[0.2em] ${
-              !params.category
-                ? 'text-[var(--color-ink)]'
-                : 'text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]'
-            }`}
+            className="font-[family-name:var(--font-body)] text-[11px] uppercase tracking-[0.2em] text-[var(--color-ink)]"
           >
             Todas
           </Link>
           {categories.map((cat) => (
             <Link
               key={cat.id}
-              href={buildHref({ category: cat.slug, page: undefined })}
-              className={`font-[family-name:var(--font-body)] text-[11px] uppercase tracking-[0.2em] ${
-                params.category === cat.slug
-                  ? 'text-[var(--color-ink)]'
-                  : 'text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]'
-              }`}
+              href={`/categorias/${cat.slug}`}
+              className="font-[family-name:var(--font-body)] text-[11px] uppercase tracking-[0.2em] text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
             >
               {cat.name}
             </Link>
