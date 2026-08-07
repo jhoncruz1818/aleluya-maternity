@@ -34,6 +34,7 @@ export interface Product {
   category?: Category;
   images: ProductImage[];
   variants: ProductVariant[];
+  updatedAt?: string;
 }
 
 export interface Address {
