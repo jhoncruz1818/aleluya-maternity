@@ -147,19 +147,29 @@ export interface InventoryItem {
     id: string;
     name: string;
     slug: string;
+    categoryId?: string;
     imageUrl: string | null;
   };
+}
+
+export interface InventoryCategoryTab {
+  id: string;
+  name: string;
+  slug: string;
+  count: number;
 }
 
 export interface InventoryListResponse {
   summary: {
     total: number;
+    filtered?: number;
     low: number;
     ok: number;
     high: number;
     lowThreshold: number;
     highThreshold: number;
   };
+  categories?: InventoryCategoryTab[];
   items: InventoryItem[];
 }
 

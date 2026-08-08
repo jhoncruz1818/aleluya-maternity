@@ -16,8 +16,16 @@ export class QueryInventoryDto {
   search?: string;
 
   @ApiPropertyOptional({
+    description: 'Filtrar por categoría (id o slug)',
+  })
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  /** @deprecated Preferir filtro por categoría. Se mantiene por compatibilidad. */
+  @ApiPropertyOptional({
     enum: ['all', 'low', 'ok', 'high'],
-    description: 'Filtro por nivel de stock',
+    description: 'Filtro por nivel de stock (opcional)',
   })
   @IsOptional()
   @IsIn(['all', 'low', 'ok', 'high'])

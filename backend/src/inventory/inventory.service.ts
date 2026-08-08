@@ -57,22 +57,38 @@ export class InventoryService {
 
   /**
    * Lista variantes con stock + nivel (low/ok/high).
+   * Filtro principal: categoría (pestañas). Nivel opcional por compatibilidad.
    */
   async list(query: QueryInventoryDto) {
     const search = query.search?.trim();
     const level = query.level ?? 'all';
+    const categoryKey = query.category?.trim();
+
+    const productWhere: Prisma.ProductWhereInput = { isActive: true };
+    if (categoryKey) {
+      productWhere.OR = [
+        { categoryId: categoryKey },
+        { category: { slug: categoryKey } },
+      ];
+    }
 
     const where: Prisma.ProductVariantWhereInput = {
-      product: { isActive: true },
+      product: productWhere,
     };
 
     if (search) {
-      where.OR = [
-        { sku: { contains: search } },
-        { size: { contains: search } },
-        { color: { contains: search } },
-        { product: { name: { contains: search } } },
+      where.AND = [
+        { product: productWhere },
+        {
+          OR: [
+            { sku: { contains: search } },
+            { size: { contains: search } },
+            { color: { contains: search } },
+            { product: { name: { contains: search } } },
+          ],
+        },
       ];
+      delete where.product;
     }
 
     if (level === 'low') {
@@ -86,24 +102,41 @@ export class InventoryService {
       };
     }
 
-    const rows = await this.prisma.productVariant.findMany({
-      where,
-      include: {
-        product: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            images: {
-              orderBy: { sortOrder: 'asc' },
-              take: 1,
-              select: { url: true },
+    const [rows, categoryRows, countRows] = await Promise.all([
+      this.prisma.productVariant.findMany({
+        where,
+        include: {
+          product: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              categoryId: true,
+              images: {
+                orderBy: { sortOrder: 'asc' },
+                take: 1,
+                select: { url: true },
+              },
             },
           },
         },
-      },
-      orderBy: [{ stock: 'asc' }, { sku: 'asc' }],
-    });
+        orderBy: [{ stock: 'asc' }, { sku: 'asc' }],
+      }),
+      this.prisma.category.findMany({
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true, slug: true },
+      }),
+      this.prisma.productVariant.findMany({
+        where: { product: { isActive: true } },
+        select: { product: { select: { categoryId: true } } },
+      }),
+    ]);
+
+    const countByCategory = new Map<string, number>();
+    for (const row of countRows) {
+      const cid = row.product.categoryId;
+      countByCategory.set(cid, (countByCategory.get(cid) ?? 0) + 1);
+    }
 
     const items = rows.map((v) => ({
       id: v.id,
@@ -116,12 +149,21 @@ export class InventoryService {
         id: v.product.id,
         name: v.product.name,
         slug: v.product.slug,
+        categoryId: v.product.categoryId,
         imageUrl: v.product.images[0]?.url ?? null,
       },
     }));
 
+    const categories = categoryRows.map((c) => ({
+      id: c.id,
+      name: c.name,
+      slug: c.slug,
+      count: countByCategory.get(c.id) ?? 0,
+    }));
+
     const summary = {
-      total: items.length,
+      total: countRows.length,
+      filtered: items.length,
       low: items.filter((i) => i.level === 'low').length,
       ok: items.filter((i) => i.level === 'ok').length,
       high: items.filter((i) => i.level === 'high').length,
@@ -129,7 +171,7 @@ export class InventoryService {
       highThreshold: STOCK_HIGH_THRESHOLD,
     };
 
-    return { summary, items };
+    return { summary, categories, items };
   }
 
   async movements(

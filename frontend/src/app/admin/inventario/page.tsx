@@ -20,7 +20,7 @@ const levelClass: Record<StockLevel, string> = {
 
 export default function AdminInventoryPage() {
   const token = useAuthStore((s) => s.token)!;
-  const [level, setLevel] = useState<'all' | StockLevel>('all');
+  const [category, setCategory] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [data, setData] = useState<InventoryListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +31,7 @@ export default function AdminInventoryPage() {
     setError(null);
     try {
       const res = await api.getInventory(token, {
-        level: level === 'all' ? undefined : level,
+        category: category === 'all' ? undefined : category,
         search: search.trim() || undefined,
       });
       setData(res);
@@ -40,11 +40,13 @@ export default function AdminInventoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, level, search]);
+  }, [token, category, search]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const lowInView = data?.summary.low ?? 0;
 
   return (
     <div>
@@ -54,8 +56,16 @@ export default function AdminInventoryPage() {
             Inventario
           </h2>
           <p className="mt-1 font-[family-name:var(--font-body)] text-sm text-[var(--color-ink-soft)]">
-            Stock por variante · bajo ≤{data?.summary.lowThreshold ?? 5} · alto ≥
-            {data?.summary.highThreshold ?? 50}
+            Stock por variante · bajo ≤{data?.summary.lowThreshold ?? 5}
+            {lowInView > 0 && (
+              <>
+                {' '}
+                ·{' '}
+                <span className="text-[var(--color-rose)]">
+                  {lowInView} en stock bajo
+                </span>
+              </>
+            )}
           </p>
         </div>
       </div>
@@ -64,32 +74,29 @@ export default function AdminInventoryPage() {
         <div className="mt-6 flex flex-wrap gap-4 font-[family-name:var(--font-body)] text-sm">
           <button
             type="button"
-            onClick={() => setLevel('all')}
-            className={level === 'all' ? 'text-[var(--color-ink)]' : 'text-[var(--color-ink-soft)]'}
+            onClick={() => setCategory('all')}
+            className={
+              category === 'all'
+                ? 'border-b border-[var(--color-ink)] text-[var(--color-ink)]'
+                : 'text-[var(--color-ink-soft)]'
+            }
           >
             Todos ({data.summary.total})
           </button>
-          <button
-            type="button"
-            onClick={() => setLevel('low')}
-            className={level === 'low' ? 'text-[var(--color-rose)]' : 'text-[var(--color-ink-soft)]'}
-          >
-            Bajo ({data.summary.low})
-          </button>
-          <button
-            type="button"
-            onClick={() => setLevel('ok')}
-            className={level === 'ok' ? 'text-[var(--color-ink)]' : 'text-[var(--color-ink-soft)]'}
-          >
-            Normal ({data.summary.ok})
-          </button>
-          <button
-            type="button"
-            onClick={() => setLevel('high')}
-            className={level === 'high' ? 'text-[var(--color-ink)]' : 'text-[var(--color-ink-soft)]'}
-          >
-            Alto ({data.summary.high})
-          </button>
+          {(data.categories ?? []).map((cat) => (
+            <button
+              key={cat.id}
+              type="button"
+              onClick={() => setCategory(cat.id)}
+              className={
+                category === cat.id
+                  ? 'border-b border-[var(--color-ink)] text-[var(--color-ink)]'
+                  : 'text-[var(--color-ink-soft)]'
+              }
+            >
+              {cat.name} ({cat.count})
+            </button>
+          ))}
         </div>
       )}
 
@@ -141,8 +148,12 @@ export default function AdminInventoryPage() {
             <tbody>
               {data.items.map((row: InventoryItem) => (
                 <tr key={row.id} className="border-b border-[var(--color-line)]">
-                  <td className="py-3 pr-3 text-[var(--color-ink)]">{row.product.name}</td>
-                  <td className="py-3 pr-3 text-[var(--color-ink-soft)]">{row.sku}</td>
+                  <td className="py-3 pr-3 text-[var(--color-ink)]">
+                    {row.product.name}
+                  </td>
+                  <td className="py-3 pr-3 text-[var(--color-ink-soft)]">
+                    {row.sku?.startsWith('AUTO-') ? '—' : row.sku}
+                  </td>
                   <td className="py-3 pr-3">{row.size}</td>
                   <td className="py-3 pr-3">{row.color}</td>
                   <td className="py-3 pr-3 font-medium">{row.stock}</td>
