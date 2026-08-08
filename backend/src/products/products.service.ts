@@ -486,11 +486,22 @@ export class ProductsService {
 
       if (byExistingId && !usedExistingIds.has(byExistingId.id)) {
         id = byExistingId.id;
-        if (!sku) sku = byExistingId.sku.trim().toUpperCase();
+        if (!sku) {
+          const prev = byExistingId.sku.trim().toUpperCase();
+          // Vaciar el campo: si era AUTO se mantiene; si era manual (000, 123…) se reemplaza por AUTO
+          sku = prev.startsWith('AUTO-')
+            ? prev
+            : await this.generateUniqueSku(size, color, reserved);
+        }
         usedExistingIds.add(byExistingId.id);
       } else if (byPair && !usedExistingIds.has(byPair.id)) {
         id = byPair.id;
-        if (!sku) sku = byPair.sku.trim().toUpperCase();
+        if (!sku) {
+          const prev = byPair.sku.trim().toUpperCase();
+          sku = prev.startsWith('AUTO-')
+            ? prev
+            : await this.generateUniqueSku(size, color, reserved);
+        }
         usedExistingIds.add(byPair.id);
       } else {
         id = undefined;
