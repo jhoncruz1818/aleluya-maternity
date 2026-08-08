@@ -29,7 +29,7 @@ const GENERIC_FORGOT_MESSAGE =
   'Si existe una cuenta verificada con ese email, enviamos un enlace para restablecer la contraseña.';
 
 const GENERIC_RESEND_VERIFY_MESSAGE =
-  'Si existe una cuenta pendiente con ese email, enviamos un nuevo enlace de confirmación.';
+  'Si hay un registro pendiente con ese email, enviamos un nuevo enlace de confirmación.';
 
 @Injectable()
 export class AuthService {
@@ -43,8 +43,8 @@ export class AuthService {
   ) {}
 
   /**
-   * Crea cuenta solo si el email de confirmación se puede enviar.
-   * Si Resend falla, se elimina el usuario (no quedan cuentas fantasma).
+   * No crea User hasta que confirmen el email.
+   * Guarda PendingRegistration + envía enlace; si el mail falla, no queda nada.
    */
   async register(dto: RegisterDto) {
     if (!this.mail.isConfigured()) {
@@ -53,66 +53,67 @@ export class AuthService {
       );
     }
 
+    await this.purgeUnverifiedUsers();
+    await this.purgeExpiredPending();
+
     const email = dto.email.toLowerCase().trim();
     const existing = await this.prisma.user.findUnique({ where: { email } });
 
     if (existing) {
-      throw new ConflictException('Ya existe una cuenta con ese email');
+      if (!existing.emailVerifiedAt) {
+        await this.prisma.user.delete({ where: { id: existing.id } }).catch(() => undefined);
+      } else {
+        throw new ConflictException('Ya existe una cuenta con ese email');
+      }
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
+    const rawToken = randomBytes(32).toString('base64url');
+    const tokenHash = this.hashToken(rawToken);
+    const expiresAt = new Date(Date.now() + VERIFY_TOKEN_TTL_MS);
 
-    const user = await this.prisma.user.create({
+    await this.prisma.pendingRegistration.deleteMany({ where: { email } });
+
+    const pending = await this.prisma.pendingRegistration.create({
       data: {
         email,
         password: hashedPassword,
         firstName: dto.firstName,
         lastName: dto.lastName,
         phone: dto.phone,
-        role: Role.CLIENT,
-        emailVerifiedAt: null,
-      },
-      select: {
-        id: true,
-        email: true,
+        tokenHash,
+        expiresAt,
       },
     });
 
+    const verifyUrl = `${this.frontendBase()}/verificar-email?token=${encodeURIComponent(rawToken)}`;
+
     try {
-      await this.issueAndSendVerification(user.id, user.email);
+      await this.mail.sendEmailVerification(email, verifyUrl);
     } catch (err) {
       this.logger.error(
-        `No se pudo verificar email ${user.email}: ${String(err)}`,
+        `No se pudo enviar confirmación a ${email}: ${String(err)}`,
       );
-      // Rollback: sin email entregable no hay cuenta
-      await this.prisma.user
-        .delete({ where: { id: user.id } })
+      await this.prisma.pendingRegistration
+        .delete({ where: { id: pending.id } })
         .catch(() => undefined);
 
-      const detail = String(err);
-      if (
-        /only send testing emails to your own email/i.test(detail) ||
-        /verify a domain/i.test(detail)
-      ) {
-        throw new BadRequestException(
-          'No pudimos enviar el correo de confirmación. Revisa que el email esté bien escrito o inténtalo de nuevo en unos minutos.',
-        );
-      }
-
       throw new BadRequestException(
-        'El correo no existe o no se puede usar. Revisa que esté bien escrito.',
+        'No pudimos enviar el correo de confirmación. Revisa que el email esté bien escrito o inténtalo de nuevo en unos minutos.',
       );
     }
 
     return {
       message:
         'Te enviamos un email para confirmar tu correo. Debes verificarlo antes de iniciar sesión.',
-      email: user.email,
+      email,
       requiresEmailVerification: true,
     };
   }
 
   async login(dto: LoginDto) {
+    await this.purgeUnverifiedUsers();
+
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
     });
@@ -127,8 +128,9 @@ export class AuthService {
     }
 
     if (!user.emailVerifiedAt) {
+      await this.prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
       throw new UnauthorizedException(
-        'Debes confirmar tu email antes de entrar. Revisa tu bandeja o reenvía el enlace.',
+        'Debes confirmar tu email antes de entrar. Si te registraste hace poco, revisa tu bandeja o vuelve a registrarte.',
       );
     }
 
@@ -151,44 +153,87 @@ export class AuthService {
   }
 
   async verifyEmail(dto: VerifyEmailDto) {
+    await this.purgeExpiredPending();
+    await this.purgeUnverifiedUsers();
+
     const tokenHash = this.hashToken(dto.token.trim());
-    const record = await this.prisma.emailVerificationToken.findUnique({
+
+    const pending = await this.prisma.pendingRegistration.findUnique({
+      where: { tokenHash },
+    });
+
+    if (pending) {
+      if (pending.expiresAt.getTime() < Date.now()) {
+        await this.prisma.pendingRegistration
+          .delete({ where: { id: pending.id } })
+          .catch(() => undefined);
+        throw new BadRequestException(
+          'El enlace no es válido o ya expiró. Solicita uno nuevo.',
+        );
+      }
+
+      const already = await this.prisma.user.findUnique({
+        where: { email: pending.email },
+      });
+      if (already?.emailVerifiedAt) {
+        await this.prisma.pendingRegistration.delete({ where: { id: pending.id } });
+        return {
+          message: 'Tu email ya estaba confirmado. Ya puedes iniciar sesión.',
+        };
+      }
+      if (already && !already.emailVerifiedAt) {
+        await this.prisma.user.delete({ where: { id: already.id } });
+      }
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.user.create({
+          data: {
+            email: pending.email,
+            password: pending.password,
+            firstName: pending.firstName,
+            lastName: pending.lastName,
+            phone: pending.phone,
+            role: Role.CLIENT,
+            emailVerifiedAt: new Date(),
+          },
+        });
+        await tx.pendingRegistration.delete({ where: { id: pending.id } });
+      });
+
+      return {
+        message: 'Email confirmado. Ya puedes iniciar sesión.',
+      };
+    }
+
+    // Compatibilidad: tokens viejos ligados a User (antes del cambio)
+    const legacy = await this.prisma.emailVerificationToken.findUnique({
       where: { tokenHash },
       include: { user: true },
     });
 
-    if (!record || record.usedAt || record.expiresAt.getTime() < Date.now()) {
+    if (!legacy || legacy.usedAt || legacy.expiresAt.getTime() < Date.now()) {
       throw new BadRequestException(
         'El enlace no es válido o ya expiró. Solicita uno nuevo.',
       );
     }
 
-    if (record.user.emailVerifiedAt) {
+    if (!legacy.user.emailVerifiedAt) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: legacy.userId },
+          data: { emailVerifiedAt: new Date() },
+        });
+        await tx.emailVerificationToken.update({
+          where: { id: legacy.id },
+          data: { usedAt: new Date() },
+        });
+      });
+    } else {
       await this.prisma.emailVerificationToken.update({
-        where: { id: record.id },
+        where: { id: legacy.id },
         data: { usedAt: new Date() },
       });
-      return { message: 'Tu email ya estaba confirmado. Ya puedes iniciar sesión.' };
     }
-
-    await this.prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: record.userId },
-        data: { emailVerifiedAt: new Date() },
-      });
-      await tx.emailVerificationToken.update({
-        where: { id: record.id },
-        data: { usedAt: new Date() },
-      });
-      await tx.emailVerificationToken.updateMany({
-        where: {
-          userId: record.userId,
-          usedAt: null,
-          id: { not: record.id },
-        },
-        data: { usedAt: new Date() },
-      });
-    });
 
     return {
       message: 'Email confirmado. Ya puedes iniciar sesión.',
@@ -196,10 +241,25 @@ export class AuthService {
   }
 
   async resendVerification(dto: ResendVerificationDto) {
+    await this.purgeExpiredPending();
+    await this.purgeUnverifiedUsers();
+
     const email = dto.email.toLowerCase().trim();
     const user = await this.prisma.user.findUnique({ where: { email } });
 
-    if (!user || user.emailVerifiedAt) {
+    if (user?.emailVerifiedAt) {
+      return { message: GENERIC_RESEND_VERIFY_MESSAGE };
+    }
+
+    if (user && !user.emailVerifiedAt) {
+      await this.prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
+    }
+
+    const pending = await this.prisma.pendingRegistration.findUnique({
+      where: { email },
+    });
+
+    if (!pending) {
       return { message: GENERIC_RESEND_VERIFY_MESSAGE };
     }
 
@@ -209,8 +269,17 @@ export class AuthService {
       );
     }
 
+    const rawToken = randomBytes(32).toString('base64url');
+    const tokenHash = this.hashToken(rawToken);
+    const expiresAt = new Date(Date.now() + VERIFY_TOKEN_TTL_MS);
+
     try {
-      await this.issueAndSendVerification(user.id, user.email);
+      await this.prisma.pendingRegistration.update({
+        where: { id: pending.id },
+        data: { tokenHash, expiresAt },
+      });
+      const verifyUrl = `${this.frontendBase()}/verificar-email?token=${encodeURIComponent(rawToken)}`;
+      await this.mail.sendEmailVerification(email, verifyUrl);
     } catch (err) {
       this.logger.error(`Reenviar verificación falló: ${String(err)}`);
       throw new ServiceUnavailableException(
@@ -225,7 +294,6 @@ export class AuthService {
     const email = dto.email.toLowerCase().trim();
     const user = await this.prisma.user.findUnique({ where: { email } });
 
-    // Solo cuentas verificadas pueden recuperar (evita spam a emails ajenos)
     if (!user || !user.emailVerifiedAt) {
       return { message: GENERIC_FORGOT_MESSAGE };
     }
@@ -306,22 +374,20 @@ export class AuthService {
     };
   }
 
-  private async issueAndSendVerification(userId: string, email: string) {
-    const rawToken = randomBytes(32).toString('base64url');
-    const tokenHash = this.hashToken(rawToken);
-    const expiresAt = new Date(Date.now() + VERIFY_TOKEN_TTL_MS);
-
-    await this.prisma.emailVerificationToken.updateMany({
-      where: { userId, usedAt: null },
-      data: { usedAt: new Date() },
+  /** Borra User sin email confirmado (no deben existir tras el nuevo flujo). */
+  private async purgeUnverifiedUsers() {
+    const result = await this.prisma.user.deleteMany({
+      where: { emailVerifiedAt: null },
     });
+    if (result.count > 0) {
+      this.logger.warn(`Eliminadas ${result.count} cuentas sin email confirmado`);
+    }
+  }
 
-    await this.prisma.emailVerificationToken.create({
-      data: { userId, tokenHash, expiresAt },
+  private async purgeExpiredPending() {
+    await this.prisma.pendingRegistration.deleteMany({
+      where: { expiresAt: { lt: new Date() } },
     });
-
-    const verifyUrl = `${this.frontendBase()}/verificar-email?token=${encodeURIComponent(rawToken)}`;
-    await this.mail.sendEmailVerification(email, verifyUrl);
   }
 
   private frontendBase() {

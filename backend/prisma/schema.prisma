@@ -36,7 +36,7 @@ model User {
   lastName  String
   phone     String?
   role      String   @default("CLIENT")
-  // null = pendiente de confirmar el correo
+  // Siempre con fecha tras el nuevo flujo (User solo se crea al confirmar)
   emailVerifiedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -47,6 +47,24 @@ model User {
   stockMovementsUndone  StockMovement[] @relation("StockMovementUndoneBy")
   passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
+}
+
+// -----------------------------------------------------------------------------
+// PendingRegistration: datos del registro ANTES de confirmar el email.
+// No hay fila en User hasta que el cliente abre el enlace (así no quedan NULL).
+// -----------------------------------------------------------------------------
+model PendingRegistration {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  password     String
+  firstName    String
+  lastName     String
+  phone        String?
+  tokenHash    String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([expiresAt])
 }
 
 // -----------------------------------------------------------------------------
@@ -68,7 +86,7 @@ model PasswordResetToken {
 }
 
 // -----------------------------------------------------------------------------
-// EmailVerificationToken: confirmar que el email del registro es real
+// EmailVerificationToken: legado (registros viejos). El flujo nuevo usa PendingRegistration.
 // -----------------------------------------------------------------------------
 model EmailVerificationToken {
   id        String    @id @default(cuid())
