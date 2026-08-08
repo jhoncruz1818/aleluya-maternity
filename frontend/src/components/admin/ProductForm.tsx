@@ -24,6 +24,7 @@ const schema = z.object({
   variants: z
     .array(
       z.object({
+        id: z.string().optional(),
         sku: z.string().optional(),
         size: z.string().min(1),
         color: z.string().min(1),
@@ -74,7 +75,9 @@ export function ProductForm({ product }: { product?: Product }) {
                   .map((img) => ({ url: img.url }))
               : [],
           variants: product.variants.map((v) => ({
-            sku: v.sku,
+            id: v.id,
+            // AUTO-… es interno: no lo mostramos; el backend lo reutiliza por id
+            sku: v.sku?.startsWith('AUTO-') ? '' : v.sku,
             size: v.size,
             color: v.color,
             stock: v.stock,
@@ -189,6 +192,7 @@ export function ProductForm({ product }: { product?: Product }) {
         sortOrder: index,
       })),
       variants: values.variants.map((v) => ({
+        ...(v.id ? { id: v.id } : {}),
         size: v.size,
         color: v.color,
         stock: v.stock,

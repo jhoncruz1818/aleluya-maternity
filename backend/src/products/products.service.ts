@@ -300,12 +300,13 @@ export class ProductsService {
 
   /**
    * Actualiza variantes sin borrar las ligadas a pedidos (OrderItem).
-   * Match por SKU; crea nuevas; solo elimina las que no tienen historial de venta.
+   * Match por id → SKU → talla+color; crea solo las realmente nuevas.
    */
   private async syncVariants(
     tx: Prisma.TransactionClient,
     productId: string,
     incoming: Array<{
+      id?: string;
       sku: string;
       size: string;
       color: string;
@@ -317,36 +318,66 @@ export class ProductsService {
       include: { _count: { select: { orderItems: true } } },
     });
 
+    const byId = new Map(existing.map((v) => [v.id, v]));
     const bySku = new Map(
       existing.map((v) => [v.sku.trim().toUpperCase(), v]),
+    );
+    const bySizeColor = new Map(
+      existing.map((v) => [
+        `${v.size.trim().toLowerCase()}|${v.color.trim().toLowerCase()}`,
+        v,
+      ]),
     );
     const keptIds = new Set<string>();
 
     for (const raw of incoming) {
       const sku = raw.sku.trim().toUpperCase();
-      const current = bySku.get(sku);
+      const sizeColorKey = `${raw.size.trim().toLowerCase()}|${raw.color.trim().toLowerCase()}`;
+
+      let current =
+        (raw.id ? byId.get(raw.id) : undefined) ??
+        bySku.get(sku) ??
+        bySizeColor.get(sizeColorKey);
+
+      // Si ya la marcamos como kept, no reutilizar (dos líneas distintas)
+      if (current && keptIds.has(current.id)) {
+        current = undefined;
+      }
 
       if (current) {
         keptIds.add(current.id);
         await tx.productVariant.update({
           where: { id: current.id },
           data: {
-            size: raw.size,
-            color: raw.color,
-            stock: raw.stock,
-          },
-        });
-      } else {
-        const created = await tx.productVariant.create({
-          data: {
-            productId,
             sku,
             size: raw.size,
             color: raw.color,
             stock: raw.stock,
           },
         });
-        keptIds.add(created.id);
+      } else {
+        try {
+          const created = await tx.productVariant.create({
+            data: {
+              productId,
+              sku,
+              size: raw.size,
+              color: raw.color,
+              stock: raw.stock,
+            },
+          });
+          keptIds.add(created.id);
+        } catch (err) {
+          if (
+            err instanceof Prisma.PrismaClientKnownRequestError &&
+            err.code === 'P2002'
+          ) {
+            throw new ConflictException(
+              `No se pudo guardar la variante ${raw.size}/${raw.color}: SKU duplicado. Revisa e intenta de nuevo.`,
+            );
+          }
+          throw err;
+        }
       }
     }
 
@@ -354,7 +385,7 @@ export class ProductsService {
     for (const variant of toRemove) {
       if (variant._count.orderItems > 0) {
         throw new BadRequestException(
-          `No se puede quitar la variante ${variant.sku}: ya tiene ventas/pedidos. Cámbiale el stock a 0 si ya no la vendes.`,
+          `No se puede quitar la variante ${variant.size}/${variant.color}: ya tiene ventas/pedidos. Cámbiale el stock a 0 si ya no la vendes.`,
         );
       }
       await tx.productVariant.delete({ where: { id: variant.id } });
@@ -406,18 +437,37 @@ export class ProductsService {
     }
   }
 
-  /** SKU vacío → genera uno interno único (las prendas aún no tienen código). */
+  /**
+   * SKU vacío: reutiliza el de la variante existente (id / talla+color)
+   * o genera uno interno AUTO-… si es nueva.
+   */
   private async normalizeVariants(
     variants: Array<{
+      id?: string;
       sku?: string;
       size: string;
       color: string;
       stock: number;
     }>,
-    excludeProductId?: string,
+    productId?: string,
   ) {
+    const existing = productId
+      ? await this.prisma.productVariant.findMany({
+          where: { productId },
+        })
+      : [];
+
+    const byId = new Map(existing.map((v) => [v.id, v]));
+    const bySizeColor = new Map(
+      existing.map((v) => [
+        `${v.size.trim().toLowerCase()}|${v.color.trim().toLowerCase()}`,
+        v,
+      ]),
+    );
+    const usedExistingIds = new Set<string>();
     const reserved = new Set<string>();
     const out: Array<{
+      id?: string;
       sku: string;
       size: string;
       color: string;
@@ -425,23 +475,38 @@ export class ProductsService {
     }> = [];
 
     for (const v of variants) {
+      const size = v.size.trim();
+      const color = v.color.trim();
+      const sizeColorKey = `${size.toLowerCase()}|${color.toLowerCase()}`;
       let sku = (v.sku ?? '').trim().toUpperCase();
-      if (!sku) {
-        sku = await this.generateUniqueSku(v.size, v.color, reserved);
-      } else if (reserved.has(sku)) {
+      let id = v.id?.trim() || undefined;
+
+      const byExistingId = id ? byId.get(id) : undefined;
+      const byPair = bySizeColor.get(sizeColorKey);
+
+      if (byExistingId && !usedExistingIds.has(byExistingId.id)) {
+        id = byExistingId.id;
+        if (!sku) sku = byExistingId.sku.trim().toUpperCase();
+        usedExistingIds.add(byExistingId.id);
+      } else if (byPair && !usedExistingIds.has(byPair.id)) {
+        id = byPair.id;
+        if (!sku) sku = byPair.sku.trim().toUpperCase();
+        usedExistingIds.add(byPair.id);
+      } else {
+        id = undefined;
+        if (!sku) {
+          sku = await this.generateUniqueSku(size, color, reserved);
+        }
+      }
+
+      if (reserved.has(sku)) {
         throw new BadRequestException('Hay SKUs duplicados en la solicitud');
       }
       reserved.add(sku);
-      out.push({
-        sku,
-        size: v.size.trim(),
-        color: v.color.trim(),
-        stock: v.stock,
-      });
+
+      out.push({ id, sku, size, color, stock: v.stock });
     }
 
-    // reserved already checked within batch; ensureSkusUnique checks DB
-    void excludeProductId;
     return out;
   }
 

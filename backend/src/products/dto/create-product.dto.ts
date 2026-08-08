@@ -35,6 +35,13 @@ export class ProductImageInputDto {
 
 export class ProductVariantInputDto {
   @ApiPropertyOptional({
+    description: 'ID de variante existente (al editar producto)',
+  })
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @ApiPropertyOptional({
     example: 'BLU-PRE-S-ROSA',
     description: 'Opcional. Si no se envía, el sistema genera uno interno.',
   })
