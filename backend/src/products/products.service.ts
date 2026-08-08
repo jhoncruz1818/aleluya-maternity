@@ -43,7 +43,7 @@ export class ProductsService {
     private readonly inventoryService: InventoryService,
   ) {}
 
-  async create(dto: CreateProductDto) {
+  async create(dto: CreateProductDto, adminUserId?: string) {
     await this.ensureCategoryExists(dto.categoryId);
 
     const slug = dto.slug ? slugify(dto.slug) : slugify(dto.name);
@@ -94,6 +94,7 @@ export class ProductsService {
             previousStock: 0,
             newStock: v.stock,
             note: 'Stock inicial al crear producto',
+            createdById: adminUserId ?? null,
           });
         }
       }
@@ -231,7 +232,7 @@ export class ProductsService {
     productsCache.invalidatePrefix('products:');
   }
 
-  async update(id: string, dto: UpdateProductDto) {
+  async update(id: string, dto: UpdateProductDto, adminUserId?: string) {
     await this.findOne(id, true);
 
     if (dto.categoryId) {
@@ -277,7 +278,7 @@ export class ProductsService {
       }
 
       if (variants) {
-        await this.syncVariants(tx, id, variants);
+        await this.syncVariants(tx, id, variants, adminUserId);
       }
 
       return tx.product.update({
@@ -312,6 +313,7 @@ export class ProductsService {
   /**
    * Actualiza variantes sin borrar las ligadas a pedidos (OrderItem).
    * Match por id → SKU → talla+color; crea solo las realmente nuevas.
+   * Todo cambio de stock deja movimiento ADJUSTMENT / INITIAL en historial.
    */
   private async syncVariants(
     tx: Prisma.TransactionClient,
@@ -323,6 +325,7 @@ export class ProductsService {
       color: string;
       stock: number;
     }>,
+    adminUserId?: string,
   ) {
     const existing = await tx.productVariant.findMany({
       where: { productId },
@@ -350,22 +353,39 @@ export class ProductsService {
         bySku.get(sku) ??
         bySizeColor.get(sizeColorKey);
 
-      // Si ya la marcamos como kept, no reutilizar (dos líneas distintas)
       if (current && keptIds.has(current.id)) {
         current = undefined;
       }
 
       if (current) {
         keptIds.add(current.id);
+        const previousStock = current.stock;
+        const newStock = raw.stock;
+
         await tx.productVariant.update({
           where: { id: current.id },
           data: {
             sku,
             size: raw.size,
             color: raw.color,
-            stock: raw.stock,
+            stock: newStock,
           },
         });
+
+        if (newStock !== previousStock) {
+          const quantity = Math.abs(newStock - previousStock);
+          await this.inventoryService.createMovement(tx, {
+            variantId: current.id,
+            type:
+              newStock > previousStock ? StockMoveType.IN : StockMoveType.OUT,
+            reason: StockMoveReason.ADJUSTMENT,
+            quantity,
+            previousStock,
+            newStock,
+            note: 'Ajuste desde edición de producto',
+            createdById: adminUserId ?? null,
+          });
+        }
       } else {
         try {
           const created = await tx.productVariant.create({
@@ -378,6 +398,19 @@ export class ProductsService {
             },
           });
           keptIds.add(created.id);
+
+          if (created.stock > 0) {
+            await this.inventoryService.createMovement(tx, {
+              variantId: created.id,
+              type: StockMoveType.IN,
+              reason: StockMoveReason.INITIAL,
+              quantity: created.stock,
+              previousStock: 0,
+              newStock: created.stock,
+              note: 'Stock inicial al agregar variante',
+              createdById: adminUserId ?? null,
+            });
+          }
         } catch (err) {
           if (
             err instanceof Prisma.PrismaClientKnownRequestError &&
@@ -399,6 +432,7 @@ export class ProductsService {
           `No se puede quitar la variante ${variant.size}/${variant.color}: ya tiene ventas/pedidos. Cámbiale el stock a 0 si ya no la vendes.`,
         );
       }
+      // Al borrar la variante, SQL Server/Prisma elimina también sus movimientos (Cascade).
       await tx.productVariant.delete({ where: { id: variant.id } });
     }
   }

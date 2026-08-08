@@ -21,6 +21,7 @@ import { QueryProductsDto } from './dto/query-products.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Role } from '../common/constants/roles';
 
 /**
@@ -80,8 +81,11 @@ export class ProductsController {
   @Roles(Role.ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Crear producto con imágenes y variantes (ADMIN)' })
-  create(@Body() dto: CreateProductDto) {
-    return this.productsService.create(dto);
+  create(
+    @CurrentUser('sub') adminUserId: string,
+    @Body() dto: CreateProductDto,
+  ) {
+    return this.productsService.create(dto, adminUserId);
   }
 
   @Patch(':id')
@@ -89,8 +93,12 @@ export class ProductsController {
   @Roles(Role.ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Actualizar producto (ADMIN)' })
-  update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
-    return this.productsService.update(id, dto);
+  update(
+    @CurrentUser('sub') adminUserId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateProductDto,
+  ) {
+    return this.productsService.update(id, dto, adminUserId);
   }
 
   @Delete(':id/hard')
