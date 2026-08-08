@@ -20,3 +20,20 @@ export const PaymentStatus = {
 } as const;
 
 export type PaymentStatus = (typeof PaymentStatus)[keyof typeof PaymentStatus];
+
+/** Canal del pedido */
+export const OrderChannel = {
+  ONLINE: 'ONLINE',
+  STORE: 'STORE',
+} as const;
+
+export type OrderChannel = (typeof OrderChannel)[keyof typeof OrderChannel];
+
+/** Métodos de pago conocidos */
+export const PaymentMethod = {
+  CARD: 'card',
+  STORE: 'store',
+  CASH: 'cash',
+} as const;
+
+export type PaymentMethod = (typeof PaymentMethod)[keyof typeof PaymentMethod];

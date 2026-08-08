@@ -254,13 +254,13 @@ export class ProductsService {
       );
     }
 
-    // Transacción: si reemplazamos imágenes/variantes, borramos las viejas primero
     const updated = await this.prisma.$transaction(async (tx) => {
       if (dto.images) {
         await tx.productImage.deleteMany({ where: { productId: id } });
       }
+
       if (dto.variants) {
-        await tx.productVariant.deleteMany({ where: { productId: id } });
+        await this.syncVariants(tx, id, dto.variants);
       }
 
       return tx.product.update({
@@ -283,16 +283,6 @@ export class ProductsService {
                 })),
               }
             : undefined,
-          variants: dto.variants
-            ? {
-                create: dto.variants.map((v) => ({
-                  sku: v.sku.trim().toUpperCase(),
-                  size: v.size,
-                  color: v.color,
-                  stock: v.stock,
-                })),
-              }
-            : undefined,
         },
         include: productInclude,
       });
@@ -300,6 +290,69 @@ export class ProductsService {
 
     this.bustPublicProductCache();
     return updated;
+  }
+
+  /**
+   * Actualiza variantes sin borrar las ligadas a pedidos (OrderItem).
+   * Match por SKU; crea nuevas; solo elimina las que no tienen historial de venta.
+   */
+  private async syncVariants(
+    tx: Prisma.TransactionClient,
+    productId: string,
+    incoming: Array<{
+      sku: string;
+      size: string;
+      color: string;
+      stock: number;
+    }>,
+  ) {
+    const existing = await tx.productVariant.findMany({
+      where: { productId },
+      include: { _count: { select: { orderItems: true } } },
+    });
+
+    const bySku = new Map(
+      existing.map((v) => [v.sku.trim().toUpperCase(), v]),
+    );
+    const keptIds = new Set<string>();
+
+    for (const raw of incoming) {
+      const sku = raw.sku.trim().toUpperCase();
+      const current = bySku.get(sku);
+
+      if (current) {
+        keptIds.add(current.id);
+        await tx.productVariant.update({
+          where: { id: current.id },
+          data: {
+            size: raw.size,
+            color: raw.color,
+            stock: raw.stock,
+          },
+        });
+      } else {
+        const created = await tx.productVariant.create({
+          data: {
+            productId,
+            sku,
+            size: raw.size,
+            color: raw.color,
+            stock: raw.stock,
+          },
+        });
+        keptIds.add(created.id);
+      }
+    }
+
+    const toRemove = existing.filter((v) => !keptIds.has(v.id));
+    for (const variant of toRemove) {
+      if (variant._count.orderItems > 0) {
+        throw new BadRequestException(
+          `No se puede quitar la variante ${variant.sku}: ya tiene ventas/pedidos. Cámbiale el stock a 0 si ya no la vendes.`,
+        );
+      }
+      await tx.productVariant.delete({ where: { id: variant.id } });
+    }
   }
 
   /**

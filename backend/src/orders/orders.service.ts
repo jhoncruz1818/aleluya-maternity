@@ -15,6 +15,8 @@ import { buildPaginationMeta } from '../common/dto/pagination.dto';
 import {
   OrderStatus,
   PaymentStatus,
+  OrderChannel,
+  PaymentMethod,
 } from '../common/constants/order-status';
 import {
   StockMoveReason,
@@ -22,6 +24,9 @@ import {
 } from '../common/constants/stock';
 import { InventoryService } from '../inventory/inventory.service';
 import { PaymentsService } from '../payments/payments.service';
+import { productsCache } from '../common/utils/ttl-cache';
+import { CreatePosSaleDto } from './dto/create-pos-sale.dto';
+import { QueryPosDailyDto } from './dto/query-pos-daily.dto';
 
 const orderInclude = {
   items: {
@@ -206,6 +211,207 @@ export class OrdersService {
     });
   }
 
+  /**
+   * Venta presencial en efectivo (ADMIN):
+   * Order channel=STORE, status=PAID, Payment method=cash APPROVED, stock SALE.
+   */
+  async createPosSale(adminUserId: string, dto: CreatePosSaleDto) {
+    const variantIds = dto.items.map((i) => i.variantId);
+    const uniqueVariantIds = [...new Set(variantIds)];
+    if (uniqueVariantIds.length !== variantIds.length) {
+      throw new BadRequestException(
+        'No repitas la misma variante: suma las cantidades en una sola línea',
+      );
+    }
+
+    const variants = await this.prisma.productVariant.findMany({
+      where: { id: { in: variantIds } },
+      include: { product: true },
+    });
+
+    if (variants.length !== variantIds.length) {
+      throw new BadRequestException('Una o más variantes no existen');
+    }
+
+    const variantMap = new Map(variants.map((v) => [v.id, v]));
+    let subtotal = 0;
+
+    const lineItems = dto.items.map((item) => {
+      const variant = variantMap.get(item.variantId)!;
+
+      if (!variant.product.isActive) {
+        throw new BadRequestException(
+          `El producto "${variant.product.name}" no está disponible`,
+        );
+      }
+      if (variant.stock < item.quantity) {
+        throw new BadRequestException(
+          `Stock insuficiente para ${variant.sku} (disponible: ${variant.stock})`,
+        );
+      }
+
+      const unitPrice = Number(
+        variant.product.discountPrice ?? variant.product.price,
+      );
+      subtotal += unitPrice * item.quantity;
+
+      return {
+        productId: variant.productId,
+        variantId: variant.id,
+        quantity: item.quantity,
+        unitPrice,
+      };
+    });
+
+    const total = Math.round(subtotal * 100) / 100;
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      const saleMovements: Array<{
+        variantId: string;
+        quantity: number;
+        previousStock: number;
+        newStock: number;
+      }> = [];
+
+      for (const item of dto.items) {
+        const current = await tx.productVariant.findUnique({
+          where: { id: item.variantId },
+        });
+        if (!current || current.stock < item.quantity) {
+          throw new BadRequestException(
+            'Stock insuficiente (se actualizó mientras cobrabas)',
+          );
+        }
+
+        const updated = await tx.productVariant.updateMany({
+          where: {
+            id: item.variantId,
+            stock: { gte: item.quantity },
+          },
+          data: { stock: { decrement: item.quantity } },
+        });
+        if (updated.count === 0) {
+          throw new BadRequestException(
+            'Stock insuficiente (se actualizó mientras cobrabas)',
+          );
+        }
+
+        saleMovements.push({
+          variantId: item.variantId,
+          quantity: item.quantity,
+          previousStock: current.stock,
+          newStock: current.stock - item.quantity,
+        });
+      }
+
+      const created = await tx.order.create({
+        data: {
+          userId: adminUserId,
+          addressId: null,
+          channel: OrderChannel.STORE,
+          status: OrderStatus.PAID,
+          subtotal,
+          shippingCost: 0,
+          discountAmount: 0,
+          total,
+          notes: dto.notes?.trim() || 'Venta presencial — efectivo',
+          items: { create: lineItems },
+          payment: {
+            create: {
+              amount: total,
+              currency: 'PEN',
+              method: PaymentMethod.CASH,
+              status: PaymentStatus.APPROVED,
+            },
+          },
+        },
+        include: {
+          ...orderInclude,
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
+      });
+
+      for (const m of saleMovements) {
+        await this.inventoryService.createMovement(tx, {
+          variantId: m.variantId,
+          type: StockMoveType.OUT,
+          reason: StockMoveReason.SALE,
+          quantity: m.quantity,
+          previousStock: m.previousStock,
+          newStock: m.newStock,
+          orderId: created.id,
+          createdById: adminUserId,
+          note: `Venta presencial ${created.id}`,
+        });
+      }
+
+      return created;
+    });
+
+    productsCache.invalidatePrefix('products:');
+    return order;
+  }
+
+  /**
+   * Caja del día: solo ventas STORE con pago cash (zona Lima).
+   */
+  async getPosDaily(query: QueryPosDailyDto) {
+    const date = query.date ?? limaToday();
+    const { start, end } = limaDayRange(date);
+
+    const where: Prisma.OrderWhereInput = {
+      channel: OrderChannel.STORE,
+      status: { not: OrderStatus.CANCELLED },
+      createdAt: { gte: start, lte: end },
+      payment: {
+        method: PaymentMethod.CASH,
+        status: PaymentStatus.APPROVED,
+      },
+    };
+
+    const orders = await this.prisma.order.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        ...orderInclude,
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    const totalAmount = orders.reduce((sum, o) => sum + Number(o.total), 0);
+    const itemsSold = orders.reduce(
+      (sum, o) =>
+        sum + (o.items?.reduce((s, i) => s + i.quantity, 0) ?? 0),
+      0,
+    );
+
+    return {
+      date,
+      timezone: 'America/Lima',
+      summary: {
+        tickets: orders.length,
+        itemsSold,
+        totalAmount: Math.round(totalAmount * 100) / 100,
+        currency: 'PEN',
+      },
+      orders,
+    };
+  }
+
   async findMine(userId: string, query: QueryOrdersDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 12;
@@ -304,10 +510,14 @@ export class OrdersService {
       throw new NotFoundException('Pedido no encontrado');
     }
 
-    // PENDING/PAID deben coincidir con Openpay; logística es libre
+    const isCashStore =
+      order.channel === OrderChannel.STORE ||
+      order.payment?.method === PaymentMethod.CASH;
+
+    // PENDING/PAID online deben coincidir con Openpay; logística es libre
     if (
-      dto.status === OrderStatus.PENDING ||
-      dto.status === OrderStatus.PAID
+      !isCashStore &&
+      (dto.status === OrderStatus.PENDING || dto.status === OrderStatus.PAID)
     ) {
       const gate = await this.paymentsService.getOpenpayPaymentGate(id);
       if (dto.status === OrderStatus.PAID && !gate.allowPaid) {
@@ -324,7 +534,6 @@ export class OrdersService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      // Solo alinear Payment.APPROVED si Openpay ya confirmó (validado arriba)
       if (dto.status === OrderStatus.PAID && order.payment) {
         await tx.payment.update({
           where: { id: order.payment.id },
@@ -339,4 +548,22 @@ export class OrdersService {
       });
     });
   }
+}
+
+/** Hoy en América/Lima como YYYY-MM-DD */
+function limaToday(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Lima',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+/** Rango UTC del día civil en Lima */
+function limaDayRange(date: string): { start: Date; end: Date } {
+  return {
+    start: new Date(`${date}T00:00:00.000-05:00`),
+    end: new Date(`${date}T23:59:59.999-05:00`),
+  };
 }

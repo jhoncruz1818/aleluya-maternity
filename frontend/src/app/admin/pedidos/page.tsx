@@ -139,6 +139,7 @@ export default function AdminPedidosPage() {
                   <p className="mt-1 font-[family-name:var(--font-body)] text-xs text-[var(--color-ink-soft)]">
                     {new Date(order.createdAt).toLocaleString('es-PE')} ·{' '}
                     {order.user?.email ?? 'cliente'}
+                    {order.channel === 'STORE' ? ' · presencial' : ' · online'}
                   </p>
                   <p className="mt-1 font-[family-name:var(--font-body)] text-[10px] text-[var(--color-ink-soft)]">
                     {order.id}
@@ -170,6 +171,50 @@ export default function AdminPedidosPage() {
                   </select>
                 </div>
               </div>
+
+              {order.items && order.items.length > 0 && (
+                <ul className="mt-4 space-y-2 border-t border-[var(--color-line)] pt-3">
+                  {order.items.map((item, idx) => {
+                    const name = item.product?.name ?? 'Producto';
+                    const size = item.variant?.size;
+                    const color = item.variant?.color;
+                    const sku = item.variant?.sku;
+                    const lineTotal =
+                      Number(item.unitPrice) * Number(item.quantity);
+                    return (
+                      <li
+                        key={item.id ?? `${order.id}-${idx}`}
+                        className="flex flex-wrap items-baseline justify-between gap-2 font-[family-name:var(--font-body)] text-sm"
+                      >
+                        <span className="text-[var(--color-ink)]">
+                          {item.quantity}× {name}
+                          {(size || color) && (
+                            <span className="text-[var(--color-ink-soft)]">
+                              {' '}
+                              · {[size, color].filter(Boolean).join(' / ')}
+                            </span>
+                          )}
+                          {sku && (
+                            <span className="text-[var(--color-ink-soft)]">
+                              {' '}
+                              · {sku}
+                            </span>
+                          )}
+                        </span>
+                        <span className="text-[var(--color-ink-soft)]">
+                          {formatPrice(lineTotal)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              {order.notes && (
+                <p className="mt-3 font-[family-name:var(--font-body)] text-xs text-[var(--color-ink-soft)]">
+                  Nota: {order.notes}
+                </p>
+              )}
 
               {order.payment && (
                 <div className="mt-3 space-y-2">

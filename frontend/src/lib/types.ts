@@ -49,9 +49,18 @@ export interface Address {
   isDefault: boolean;
 }
 
+export interface OrderItem {
+  id?: string;
+  quantity: number;
+  unitPrice: string | number;
+  product?: { id?: string; name?: string; slug?: string };
+  variant?: { id?: string; sku?: string; size?: string; color?: string };
+}
+
 export interface Order {
   id: string;
   status: string;
+  channel?: string;
   subtotal: string | number;
   shippingCost: string | number;
   discountAmount?: string | number;
@@ -59,7 +68,7 @@ export interface Order {
   total: string | number;
   notes: string | null;
   createdAt: string;
-  items?: unknown[];
+  items?: OrderItem[];
   payment?: {
     id: string;
     status: string;
@@ -75,6 +84,18 @@ export interface Order {
     firstName: string;
     lastName: string;
   };
+}
+
+export interface PosDailyReport {
+  date: string;
+  timezone: string;
+  summary: {
+    tickets: number;
+    itemsSold: number;
+    totalAmount: number;
+    currency: string;
+  };
+  orders: Order[];
 }
 
 export interface PromoCode {

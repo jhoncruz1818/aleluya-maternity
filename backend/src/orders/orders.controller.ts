@@ -15,7 +15,9 @@ import {
 } from '@nestjs/swagger';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { CreatePosSaleDto } from './dto/create-pos-sale.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
+import { QueryPosDailyDto } from './dto/query-pos-daily.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -66,6 +68,29 @@ export class OrdersController {
   @ApiOperation({ summary: 'Listar todos los pedidos (ADMIN)' })
   findAllAdmin(@Query() query: QueryOrdersDto) {
     return this.ordersService.findAllAdmin(query);
+  }
+
+  @Post('admin/pos')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Venta presencial en efectivo (ADMIN) — descuenta stock como SALE',
+  })
+  createPosSale(
+    @CurrentUser('sub') adminUserId: string,
+    @Body() dto: CreatePosSaleDto,
+  ) {
+    return this.ordersService.createPosSale(adminUserId, dto);
+  }
+
+  @Get('admin/pos/daily')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Caja del día — solo ventas presenciales cash (ADMIN)',
+  })
+  posDaily(@Query() query: QueryPosDailyDto) {
+    return this.ordersService.getPosDaily(query);
   }
 
   @Get(':id/openpay-gate')

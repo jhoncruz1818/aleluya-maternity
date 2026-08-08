@@ -9,6 +9,9 @@ import { AddToCartPanel } from '@/components/products/AddToCartPanel';
 import { RelatedProducts } from '@/components/products/RelatedProducts';
 import { getSiteUrl } from '@/lib/site';
 
+/** Stock fresco: no cachear la página de producto. */
+export const dynamic = 'force-dynamic';
+
 type Props = {
   params: Promise<{ slug: string }>;
 };

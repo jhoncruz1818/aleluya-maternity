@@ -20,6 +20,8 @@ type RequestOptions = {
   body?: unknown;
   token?: string | null;
   query?: Record<string, string | number | boolean | undefined | null>;
+  /** Segundos ISR en server; 0 = no cachear (stock fresco). */
+  revalidate?: number;
 };
 
 function buildUrl(path: string, query?: RequestOptions['query']) {
@@ -42,7 +44,7 @@ export async function apiFetch<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const { method = 'GET', body, token, query } = options;
+  const { method = 'GET', body, token, query, revalidate } = options;
 
   const headers: HeadersInit = {
     Accept: 'application/json',
@@ -61,7 +63,12 @@ export async function apiFetch<T>(
   };
 
   if (typeof window === 'undefined' && method === 'GET') {
-    init.next = { revalidate: 120 };
+    const ttl = revalidate ?? 60;
+    if (ttl === 0) {
+      init.cache = 'no-store';
+    } else {
+      init.next = { revalidate: ttl };
+    }
   }
 
   const res = await fetch(buildUrl(path, query), init);
@@ -83,15 +90,18 @@ export async function apiFetch<T>(
 }
 
 export const api = {
-  getCategories: () => apiFetch<import('./types').Category[]>('/categories'),
+  getCategories: () =>
+    apiFetch<import('./types').Category[]>('/categories', { revalidate: 60 }),
   getProducts: (query?: RequestOptions['query']) =>
     apiFetch<import('./types').Paginated<import('./types').Product>>(
       '/products',
-      { query },
+      { query, revalidate: 30 },
     ),
+  /** Detalle: sin cache — el stock debe reflejar ventas al instante. */
   getProduct: (idOrSlug: string) =>
-    apiFetch<import('./types').Product>(`/products/${idOrSlug}`),
-
+    apiFetch<import('./types').Product>(`/products/${idOrSlug}`, {
+      revalidate: 0,
+    }),
   register: (body: unknown) =>
     apiFetch<{
       message: string;
@@ -258,6 +268,23 @@ export const api = {
       allowPending: boolean;
       allowPaid: boolean;
     }>(`/orders/${orderId}/openpay-gate`, { token }),
+  createPosSale: (
+    token: string,
+    body: {
+      items: Array<{ variantId: string; quantity: number }>;
+      notes?: string;
+    },
+  ) =>
+    apiFetch<import('./types').Order>('/orders/admin/pos', {
+      method: 'POST',
+      token,
+      body,
+    }),
+  getPosDaily: (token: string, query?: { date?: string }) =>
+    apiFetch<import('./types').PosDailyReport>('/orders/admin/pos/daily', {
+      token,
+      query,
+    }),
   syncPayment: (token: string, orderId: string) =>
     apiFetch<{
       message: string;

@@ -95,7 +95,7 @@ export class AuthService {
         /verify a domain/i.test(detail)
       ) {
         throw new BadRequestException(
-          'En pruebas solo podemos enviar el correo de confirmación a jhoncopo1818@hotmail.com. Para otros emails hay que verificar un dominio en Resend.',
+          'No pudimos enviar el correo de confirmación. Revisa que el email esté bien escrito o inténtalo de nuevo en unos minutos.',
         );
       }
 

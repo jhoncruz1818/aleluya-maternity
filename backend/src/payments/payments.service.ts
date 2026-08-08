@@ -86,7 +86,7 @@ export class PaymentsService {
       throw new BadRequestException('El monto mínimo es S/ 1.00');
     }
 
-    const phone = order.user.phone || order.address.phone || '999999999';
+    const phone = order.user.phone || order.address?.phone || '999999999';
 
     const customer = {
       name: order.user.firstName,

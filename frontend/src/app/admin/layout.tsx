@@ -10,6 +10,8 @@ const nav = [
   { href: '/admin/productos', label: 'Productos' },
   { href: '/admin/categorias', label: 'Categorías' },
   { href: '/admin/inventario', label: 'Inventario' },
+  { href: '/admin/venta-presencial', label: 'Venta presencial' },
+  { href: '/admin/caja-del-dia', label: 'Caja del día' },
   { href: '/admin/pedidos', label: 'Pedidos' },
   { href: '/admin/cupones', label: 'Cupones' },
 ];

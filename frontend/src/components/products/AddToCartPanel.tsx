@@ -1,23 +1,29 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api } from '@/lib/api';
 import { useCartStore } from '@/store/cart';
-import { formatPrice, type Product } from '@/lib/types';
+import { formatPrice, type Product, type ProductVariant } from '@/lib/types';
 
 /**
  * Selector de variante + botón "Agregar a la bolsa".
- * Client component porque el carrito vive en Zustand (estado del navegador).
+ * Refresca stock (API) y la página (router.refresh) cada 15s / al volver a la pestaña.
  */
 export function AddToCartPanel({ product }: { product: Product }) {
+  const router = useRouter();
   const addItem = useCartStore((s) => s.addItem);
+  const [variants, setVariants] = useState<ProductVariant[]>(
+    product.variants ?? [],
+  );
 
   const sizes = useMemo(
-    () => [...new Set(product.variants.map((v) => v.size))],
-    [product.variants],
+    () => [...new Set(variants.map((v) => v.size))],
+    [variants],
   );
   const colors = useMemo(
-    () => [...new Set(product.variants.map((v) => v.color))],
-    [product.variants],
+    () => [...new Set(variants.map((v) => v.color))],
+    [variants],
   );
 
   const [size, setSize] = useState(sizes[0] ?? '');
@@ -25,9 +31,45 @@ export function AddToCartPanel({ product }: { product: Product }) {
   const [qty, setQty] = useState(1);
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  const selected = product.variants.find(
-    (v) => v.size === size && v.color === color,
-  );
+  const refreshStock = useCallback(async () => {
+    try {
+      const fresh = await api.getProduct(product.slug);
+      setVariants(fresh.variants ?? []);
+      router.refresh();
+    } catch {
+      /* mantener variantes actuales */
+    }
+  }, [product.slug, router]);
+
+  useEffect(() => {
+    void refreshStock();
+    const REFRESH_MS = 15_000;
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshStock();
+    }, REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refreshStock();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [refreshStock]);
+
+  useEffect(() => {
+    setVariants(product.variants ?? []);
+  }, [product.variants]);
+
+  const selected = variants.find((v) => v.size === size && v.color === color);
+
+  useEffect(() => {
+    if (selected && qty > selected.stock) {
+      setQty(Math.max(1, selected.stock || 1));
+    }
+  }, [selected, qty]);
 
   const unitPrice = Number(product.discountPrice ?? product.price);
   const imageUrl = product.images?.[0]?.url;
@@ -61,6 +103,7 @@ export function AddToCartPanel({ product }: { product: Product }) {
     );
     setFeedback('Agregado a la bolsa');
     setTimeout(() => setFeedback(null), 2200);
+    void refreshStock();
   };
 
   return (
@@ -71,7 +114,7 @@ export function AddToCartPanel({ product }: { product: Product }) {
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           {sizes.map((s) => {
-            const available = product.variants.some(
+            const available = variants.some(
               (v) => v.size === s && v.color === color && v.stock > 0,
             );
             return (
@@ -99,7 +142,7 @@ export function AddToCartPanel({ product }: { product: Product }) {
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           {colors.map((c) => {
-            const available = product.variants.some(
+            const available = variants.some(
               (v) => v.color === c && v.size === size && v.stock > 0,
             );
             return (
@@ -143,7 +186,7 @@ export function AddToCartPanel({ product }: { product: Product }) {
             className="px-3 py-2 text-[var(--color-ink)]"
             onClick={() =>
               setQty((q) =>
-                selected ? Math.min(selected.stock, q + 1) : q + 1,
+                selected ? Math.min(Math.max(selected.stock, 1), q + 1) : q + 1,
               )
             }
           >

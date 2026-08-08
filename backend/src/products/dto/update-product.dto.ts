@@ -9,8 +9,8 @@ import {
 
 /**
  * Update: campos base opcionales.
- * Si envías images o variants, reemplazan por completo las actuales
- * (más simple de razonar que un merge parcial).
+ * images: si se envían, reemplazan las actuales.
+ * variants: se sincronizan por SKU (update/create); no se borran si ya tienen ventas.
  */
 export class UpdateProductDto extends PartialType(
   OmitType(CreateProductDto, ['images', 'variants'] as const),
