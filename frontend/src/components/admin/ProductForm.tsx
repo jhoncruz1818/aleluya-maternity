@@ -76,8 +76,11 @@ export function ProductForm({ product }: { product?: Product }) {
               : [],
           variants: product.variants.map((v) => ({
             id: v.id,
-            // AUTO-… es interno: no lo mostramos; el backend lo reutiliza por id
-            sku: v.sku?.startsWith('AUTO-') ? '' : v.sku,
+            // Códigos internos AUTO-… no se muestran; el backend los reutiliza por id
+            sku:
+              !v.sku || v.sku.toUpperCase().startsWith('AUTO-')
+                ? ''
+                : v.sku,
             size: v.size,
             color: v.color,
             stock: v.stock,
@@ -404,6 +407,10 @@ export function ProductForm({ product }: { product?: Product }) {
             + Variante
           </button>
         </div>
+        <p className="mt-1 font-[family-name:var(--font-body)] text-xs text-[var(--color-ink-soft)]">
+          SKU es opcional. Si lo dejas vacío, el sistema lo asigna solo (no hace
+          falta inventar códigos).
+        </p>
         <div className="mt-3 space-y-3">
           {variantFields.map((field, index) => (
             <div
