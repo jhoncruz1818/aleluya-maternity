@@ -231,6 +231,11 @@ export const api = {
       method: 'DELETE',
       token,
     }),
+  hardDeleteProduct: (token: string, id: string) =>
+    apiFetch<{ message: string }>(`/products/${id}/hard`, {
+      method: 'DELETE',
+      token,
+    }),
   createCategory: (token: string, body: unknown) =>
     apiFetch<import('./types').Category>('/categories', {
       method: 'POST',

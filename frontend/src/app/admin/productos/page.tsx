@@ -27,13 +27,33 @@ export default function AdminProductosPage() {
   }, [load]);
 
   const softDelete = async (id: string) => {
-    if (!confirm('¿Desactivar este producto? (soft-delete)')) return;
+    if (!confirm('¿Desactivar este producto? Dejará de verse en la tienda.'))
+      return;
     setBusyId(id);
     try {
       await api.deleteProduct(token, id);
       await load();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'No se pudo desactivar');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const hardDelete = async (id: string) => {
+    if (
+      !confirm(
+        '¿Eliminar este producto de forma permanente? Esta acción no se puede deshacer.',
+      )
+    ) {
+      return;
+    }
+    setBusyId(id);
+    try {
+      await api.hardDeleteProduct(token, id);
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'No se pudo eliminar');
     } finally {
       setBusyId(null);
     }
@@ -77,15 +97,26 @@ export default function AdminProductosPage() {
               >
                 Editar
               </Link>
-              {p.isActive && (
+              {p.canDelete ? (
                 <button
                   type="button"
                   disabled={busyId === p.id}
-                  onClick={() => softDelete(p.id)}
+                  onClick={() => hardDelete(p.id)}
                   className="font-[family-name:var(--font-body)] text-[11px] uppercase tracking-[0.16em] text-[var(--color-rose)] disabled:opacity-40"
                 >
-                  Desactivar
+                  Eliminar
                 </button>
+              ) : (
+                p.isActive && (
+                  <button
+                    type="button"
+                    disabled={busyId === p.id}
+                    onClick={() => softDelete(p.id)}
+                    className="font-[family-name:var(--font-body)] text-[11px] uppercase tracking-[0.16em] text-[var(--color-rose)] disabled:opacity-40"
+                  >
+                    Desactivar
+                  </button>
+                )
               )}
             </div>
           </li>

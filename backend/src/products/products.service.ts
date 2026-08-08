@@ -171,13 +171,24 @@ export class ProductsService {
               category: true,
               images: { orderBy: { sortOrder: 'asc' }, take: 1 },
               variants: true,
+              _count: { select: { orderItems: true } },
             }
           : publicListInclude,
       }),
     ]);
 
     const result = {
-      data,
+      data: forAdmin
+        ? data.map((p) => {
+            const { _count, ...rest } = p as typeof p & {
+              _count: { orderItems: number };
+            };
+            return {
+              ...rest,
+              canDelete: _count.orderItems === 0,
+            };
+          })
+        : data,
       meta: buildPaginationMeta(total, page, limit),
     };
 
@@ -406,6 +417,27 @@ export class ProductsService {
 
     this.bustPublicProductCache();
     return { message: 'Producto desactivado (soft-delete)' };
+  }
+
+  /**
+   * Borrado definitivo solo si no hay líneas de pedido ligadas.
+   */
+  async hardDelete(id: string) {
+    await this.findOne(id, true);
+
+    const orderItems = await this.prisma.orderItem.count({
+      where: { productId: id },
+    });
+    if (orderItems > 0) {
+      throw new BadRequestException(
+        'Este producto ya tiene ventas/pedidos. Solo puedes desactivarlo.',
+      );
+    }
+
+    await this.prisma.product.delete({ where: { id } });
+
+    this.bustPublicProductCache();
+    return { message: 'Producto eliminado' };
   }
 
   private validatePrices(price: number, discountPrice?: number) {

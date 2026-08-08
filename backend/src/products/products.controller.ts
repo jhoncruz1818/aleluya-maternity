@@ -93,6 +93,18 @@ export class ProductsController {
     return this.productsService.update(id, dto);
   }
 
+  @Delete(':id/hard')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary:
+      'Eliminar producto definitivo (solo si no tiene pedidos/ventas) (ADMIN)',
+  })
+  hardRemove(@Param('id') id: string) {
+    return this.productsService.hardDelete(id);
+  }
+
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)

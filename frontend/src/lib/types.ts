@@ -35,6 +35,8 @@ export interface Product {
   images: ProductImage[];
   variants: ProductVariant[];
   updatedAt?: string;
+  /** true si no tiene pedidos/ventas y se puede borrar del todo */
+  canDelete?: boolean;
 }
 
 export interface Address {
