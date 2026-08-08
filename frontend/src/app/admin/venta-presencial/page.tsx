@@ -6,6 +6,23 @@ import { api, ApiError } from '@/lib/api';
 import { formatPrice, type Order, type Product } from '@/lib/types';
 import { useAuthStore } from '@/store/auth';
 
+type PosPaymentMethod = 'cash' | 'yape' | 'card' | 'transfer';
+
+const PAYMENT_OPTIONS: Array<{ value: PosPaymentMethod; label: string }> = [
+  { value: 'cash', label: 'Efectivo' },
+  { value: 'yape', label: 'Yape/Plin' },
+  { value: 'card', label: 'Tarjeta' },
+  { value: 'transfer', label: 'Transferencia' },
+];
+
+function paymentLabel(method?: string | null) {
+  if (method === 'yape') return 'Yape/Plin';
+  if (method === 'card') return 'Tarjeta';
+  if (method === 'transfer') return 'Transferencia';
+  if (method === 'cash') return 'Efectivo';
+  return method ?? '—';
+}
+
 type CartLine = {
   variantId: string;
   productName: string;
@@ -49,9 +66,8 @@ function rowsFromProducts(products: Product[]): CatalogRow[] {
 }
 
 /**
- * Caja / venta presencial en efectivo.
- * Crea pedido STORE + descuenta stock como SALE.
- * El catálogo se refresca cada 15s y al volver a la pestaña.
+ * Caja / venta presencial.
+ * Tipo de pago + descuento opcional; descuenta stock como SALE.
  */
 export default function VentaPresencialPage() {
   const token = useAuthStore((s) => s.token)!;
@@ -59,6 +75,9 @@ export default function VentaPresencialPage() {
   const [rows, setRows] = useState<CatalogRow[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [notes, setNotes] = useState('');
+  const [paymentMethod, setPaymentMethod] =
+    useState<PosPaymentMethod>('cash');
+  const [discountInput, setDiscountInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,7 +92,6 @@ export default function VentaPresencialPage() {
         .map((line) => {
           const fresh = stockById.get(line.variantId);
           if (!fresh) {
-            // Variante sin stock o ya no aparece: dejar qty 0 para filtrar
             return { ...line, stock: 0, quantity: 0 };
           }
           return {
@@ -120,7 +138,6 @@ export default function VentaPresencialPage() {
     void load();
   }, [load]);
 
-  // Refresco periódico + al volver a la pestaña
   useEffect(() => {
     const REFRESH_MS = 15_000;
 
@@ -146,10 +163,18 @@ export default function VentaPresencialPage() {
     };
   }, [load]);
 
-  const total = useMemo(
+  const subtotal = useMemo(
     () => cart.reduce((s, l) => s + l.unitPrice * l.quantity, 0),
     [cart],
   );
+
+  const discountAmount = useMemo(() => {
+    const raw = Number(discountInput.replace(',', '.'));
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    return Math.min(raw, subtotal);
+  }, [discountInput, subtotal]);
+
+  const total = Math.round((subtotal - discountAmount) * 100) / 100;
 
   const addToCart = (row: CatalogRow) => {
     setLastSale(null);
@@ -205,11 +230,15 @@ export default function VentaPresencialPage() {
           variantId: l.variantId,
           quantity: l.quantity,
         })),
+        paymentMethod,
+        discountAmount: discountAmount > 0 ? discountAmount : undefined,
         notes: notes.trim() || undefined,
       });
       setLastSale(order);
       setCart([]);
       setNotes('');
+      setDiscountInput('');
+      setPaymentMethod('cash');
       await load();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'No se pudo cobrar');
@@ -226,7 +255,7 @@ export default function VentaPresencialPage() {
             Venta presencial
           </h2>
           <p className="mt-1 font-[family-name:var(--font-body)] text-sm text-[var(--color-ink-soft)]">
-            Cobro en efectivo · descuenta stock como venta (SALE)
+            Caja en tienda · descuenta stock como venta
             {lastSyncAt && (
               <>
                 {' '}
@@ -261,7 +290,11 @@ export default function VentaPresencialPage() {
           </p>
           <p className="mt-2 font-[family-name:var(--font-body)] text-sm text-[var(--color-ink-soft)]">
             #{lastSale.id.slice(-8).toUpperCase()} ·{' '}
-            {formatPrice(lastSale.total)} · efectivo
+            {formatPrice(lastSale.total)} ·{' '}
+            {paymentLabel(lastSale.payment?.method)}
+            {Number(lastSale.discountAmount ?? 0) > 0 && (
+              <> · dto. {formatPrice(lastSale.discountAmount)}</>
+            )}
           </p>
         </div>
       )}
@@ -310,8 +343,11 @@ export default function VentaPresencialPage() {
                       {row.productName}
                     </p>
                     <p className="font-[family-name:var(--font-body)] text-xs text-[var(--color-ink-soft)]">
-                      {row.size} / {row.color} · {row.sku} · stock {row.stock} ·{' '}
-                      {formatPrice(row.unitPrice)}
+                      {row.size} / {row.color}
+                      {row.sku && !row.sku.startsWith('AUTO-')
+                        ? ` · ${row.sku}`
+                        : ''}{' '}
+                      · stock {row.stock} · {formatPrice(row.unitPrice)}
                     </p>
                   </div>
                   <button
@@ -354,7 +390,8 @@ export default function VentaPresencialPage() {
                         {line.productName}
                       </p>
                       <p className="font-[family-name:var(--font-body)] text-xs text-[var(--color-ink-soft)]">
-                        {line.size} / {line.color} · {formatPrice(line.unitPrice)}
+                        {line.size} / {line.color} ·{' '}
+                        {formatPrice(line.unitPrice)}
                       </p>
                     </div>
                     <button
@@ -394,17 +431,58 @@ export default function VentaPresencialPage() {
 
           <label className="mt-6 block">
             <span className="font-[family-name:var(--font-body)] text-[11px] uppercase tracking-[0.18em] text-[var(--color-ink-soft)]">
+              Tipo de pago
+            </span>
+            <select
+              value={paymentMethod}
+              onChange={(e) =>
+                setPaymentMethod(e.target.value as PosPaymentMethod)
+              }
+              className="mt-2 w-full border border-[var(--color-line)] bg-transparent px-4 py-3 font-[family-name:var(--font-body)] text-sm outline-none focus:border-[var(--color-ink)]"
+            >
+              {PAYMENT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="mt-4 block">
+            <span className="font-[family-name:var(--font-body)] text-[11px] uppercase tracking-[0.18em] text-[var(--color-ink-soft)]">
+              Descuento (S/) — opcional
+            </span>
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              value={discountInput}
+              onChange={(e) => setDiscountInput(e.target.value)}
+              className="mt-2 w-full border border-[var(--color-line)] bg-transparent px-4 py-3 font-[family-name:var(--font-body)] text-sm outline-none focus:border-[var(--color-ink)]"
+              placeholder="Ej. prenda con defecto"
+            />
+          </label>
+
+          <label className="mt-4 block">
+            <span className="font-[family-name:var(--font-body)] text-[11px] uppercase tracking-[0.18em] text-[var(--color-ink-soft)]">
               Nota (opcional)
             </span>
             <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="mt-2 w-full border border-[var(--color-line)] bg-transparent px-4 py-3 font-[family-name:var(--font-body)] text-sm outline-none focus:border-[var(--color-ink)]"
-              placeholder="Ej. cliente mostrador"
+              placeholder="Ej. mancha en costura / cliente mostrador"
             />
           </label>
 
-          <p className="mt-6 font-[family-name:var(--font-display)] text-2xl tracking-[0.06em] text-[var(--color-ink)]">
+          <div className="mt-6 space-y-1 font-[family-name:var(--font-body)] text-sm text-[var(--color-ink-soft)]">
+            <p>Subtotal {formatPrice(subtotal)}</p>
+            {discountAmount > 0 && (
+              <p>Descuento −{formatPrice(discountAmount)}</p>
+            )}
+          </div>
+
+          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl tracking-[0.06em] text-[var(--color-ink)]">
             {formatPrice(total)}
           </p>
 
@@ -414,7 +492,9 @@ export default function VentaPresencialPage() {
             disabled={!cart.length || submitting}
             onClick={() => void checkout()}
           >
-            {submitting ? 'Cobrando…' : 'Cobrar en efectivo'}
+            {submitting
+              ? 'Cobrando…'
+              : `Cobrar · ${PAYMENT_OPTIONS.find((o) => o.value === paymentMethod)?.label}`}
           </button>
         </div>
       </div>

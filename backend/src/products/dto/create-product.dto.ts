@@ -34,11 +34,14 @@ export class ProductImageInputDto {
 }
 
 export class ProductVariantInputDto {
-  @ApiProperty({ example: 'BLU-PRE-S-ROSA' })
+  @ApiPropertyOptional({
+    example: 'BLU-PRE-S-ROSA',
+    description: 'Opcional. Si no se envía, el sistema genera uno interno.',
+  })
+  @IsOptional()
   @IsString()
-  @MinLength(3)
   @MaxLength(60)
-  sku: string;
+  sku?: string;
 
   @ApiProperty({ example: 'S' })
   @IsString()

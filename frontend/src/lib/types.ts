@@ -93,6 +93,13 @@ export interface PosDailyReport {
     tickets: number;
     itemsSold: number;
     totalAmount: number;
+    totalDiscount?: number;
+    byMethod?: {
+      cash: number;
+      yape: number;
+      card: number;
+      transfer: number;
+    };
     currency: string;
   };
   orders: Order[];

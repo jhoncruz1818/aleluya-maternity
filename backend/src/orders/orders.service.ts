@@ -17,6 +17,7 @@ import {
   PaymentStatus,
   OrderChannel,
   PaymentMethod,
+  posPaymentLabel,
 } from '../common/constants/order-status';
 import {
   StockMoveReason,
@@ -212,8 +213,8 @@ export class OrdersService {
   }
 
   /**
-   * Venta presencial en efectivo (ADMIN):
-   * Order channel=STORE, status=PAID, Payment method=cash APPROVED, stock SALE.
+   * Venta presencial (ADMIN):
+   * Order channel=STORE, status=PAID, Payment cash|yape|transfer APPROVED, stock SALE.
    */
   async createPosSale(adminUserId: string, dto: CreatePosSaleDto) {
     const variantIds = dto.items.map((i) => i.variantId);
@@ -263,7 +264,20 @@ export class OrdersService {
       };
     });
 
-    const total = Math.round(subtotal * 100) / 100;
+    subtotal = Math.round(subtotal * 100) / 100;
+    const discountAmount = Math.min(
+      Math.max(0, Number(dto.discountAmount ?? 0)),
+      subtotal,
+    );
+    const total = Math.round((subtotal - discountAmount) * 100) / 100;
+    const paymentMethod = dto.paymentMethod;
+    const paymentLabel = posPaymentLabel(paymentMethod);
+    const defaultNotes = `Venta presencial — ${paymentLabel}`;
+    const notes =
+      dto.notes?.trim() ||
+      (discountAmount > 0
+        ? `${defaultNotes} · descuento S/ ${discountAmount.toFixed(2)}`
+        : defaultNotes);
 
     const order = await this.prisma.$transaction(async (tx) => {
       const saleMovements: Array<{
@@ -312,15 +326,15 @@ export class OrdersService {
           status: OrderStatus.PAID,
           subtotal,
           shippingCost: 0,
-          discountAmount: 0,
+          discountAmount,
           total,
-          notes: dto.notes?.trim() || 'Venta presencial — efectivo',
+          notes,
           items: { create: lineItems },
           payment: {
             create: {
               amount: total,
               currency: 'PEN',
-              method: PaymentMethod.CASH,
+              method: paymentMethod,
               status: PaymentStatus.APPROVED,
             },
           },
@@ -360,7 +374,7 @@ export class OrdersService {
   }
 
   /**
-   * Caja del día: solo ventas STORE con pago cash (zona Lima).
+   * Caja del día: ventas STORE con pago aprobado (efectivo / yape / transferencia).
    */
   async getPosDaily(query: QueryPosDailyDto) {
     const date = query.date ?? limaToday();
@@ -371,7 +385,14 @@ export class OrdersService {
       status: { not: OrderStatus.CANCELLED },
       createdAt: { gte: start, lte: end },
       payment: {
-        method: PaymentMethod.CASH,
+        method: {
+          in: [
+            PaymentMethod.CASH,
+            PaymentMethod.YAPE,
+            PaymentMethod.CARD,
+            PaymentMethod.TRANSFER,
+          ],
+        },
         status: PaymentStatus.APPROVED,
       },
     };
@@ -393,11 +414,30 @@ export class OrdersService {
     });
 
     const totalAmount = orders.reduce((sum, o) => sum + Number(o.total), 0);
+    const totalDiscount = orders.reduce(
+      (sum, o) => sum + Number(o.discountAmount ?? 0),
+      0,
+    );
     const itemsSold = orders.reduce(
       (sum, o) =>
         sum + (o.items?.reduce((s, i) => s + i.quantity, 0) ?? 0),
       0,
     );
+
+    const byMethod = {
+      cash: 0,
+      yape: 0,
+      card: 0,
+      transfer: 0,
+    };
+    for (const o of orders) {
+      const m = o.payment?.method;
+      const amount = Number(o.total);
+      if (m === PaymentMethod.YAPE) byMethod.yape += amount;
+      else if (m === PaymentMethod.CARD) byMethod.card += amount;
+      else if (m === PaymentMethod.TRANSFER) byMethod.transfer += amount;
+      else byMethod.cash += amount;
+    }
 
     return {
       date,
@@ -406,6 +446,13 @@ export class OrdersService {
         tickets: orders.length,
         itemsSold,
         totalAmount: Math.round(totalAmount * 100) / 100,
+        totalDiscount: Math.round(totalDiscount * 100) / 100,
+        byMethod: {
+          cash: Math.round(byMethod.cash * 100) / 100,
+          yape: Math.round(byMethod.yape * 100) / 100,
+          card: Math.round(byMethod.card * 100) / 100,
+          transfer: Math.round(byMethod.transfer * 100) / 100,
+        },
         currency: 'PEN',
       },
       orders,
@@ -510,13 +557,15 @@ export class OrdersService {
       throw new NotFoundException('Pedido no encontrado');
     }
 
-    const isCashStore =
+    const isStorePos =
       order.channel === OrderChannel.STORE ||
-      order.payment?.method === PaymentMethod.CASH;
+      order.payment?.method === PaymentMethod.CASH ||
+      order.payment?.method === PaymentMethod.YAPE ||
+      order.payment?.method === PaymentMethod.TRANSFER;
 
     // PENDING/PAID online deben coincidir con Openpay; logística es libre
     if (
-      !isCashStore &&
+      !isStorePos &&
       (dto.status === OrderStatus.PENDING || dto.status === OrderStatus.PAID)
     ) {
       const gate = await this.paymentsService.getOpenpayPaymentGate(id);

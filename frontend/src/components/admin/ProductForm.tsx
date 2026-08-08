@@ -24,7 +24,7 @@ const schema = z.object({
   variants: z
     .array(
       z.object({
-        sku: z.string().min(3),
+        sku: z.string().optional(),
         size: z.string().min(1),
         color: z.string().min(1),
         stock: z.number().min(0),
@@ -188,7 +188,12 @@ export function ProductForm({ product }: { product?: Product }) {
         alt: values.name,
         sortOrder: index,
       })),
-      variants: values.variants,
+      variants: values.variants.map((v) => ({
+        size: v.size,
+        color: v.color,
+        stock: v.stock,
+        ...(v.sku?.trim() ? { sku: v.sku.trim() } : {}),
+      })),
     };
 
     try {
@@ -403,7 +408,7 @@ export function ProductForm({ product }: { product?: Product }) {
             >
               <input
                 className="field-input"
-                placeholder="SKU"
+                placeholder="SKU (opcional)"
                 {...register(`variants.${index}.sku`)}
               />
               <input

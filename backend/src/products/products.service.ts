@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -48,7 +49,8 @@ export class ProductsService {
     const slug = dto.slug ? slugify(dto.slug) : slugify(dto.name);
     await this.ensureSlugUnique(slug);
     this.validatePrices(dto.price, dto.discountPrice);
-    await this.ensureSkusUnique(dto.variants.map((v) => v.sku));
+    const variants = await this.normalizeVariants(dto.variants);
+    await this.ensureSkusUnique(variants.map((v) => v.sku));
 
     const created = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
@@ -71,8 +73,8 @@ export class ProductsService {
               }
             : undefined,
           variants: {
-            create: dto.variants.map((v) => ({
-              sku: v.sku.trim().toUpperCase(),
+            create: variants.map((v) => ({
+              sku: v.sku,
               size: v.size,
               color: v.color,
               stock: v.stock,
@@ -247,9 +249,13 @@ export class ProductsService {
       );
     }
 
-    if (dto.variants?.length) {
+    const variants = dto.variants?.length
+      ? await this.normalizeVariants(dto.variants, id)
+      : undefined;
+
+    if (variants) {
       await this.ensureSkusUnique(
-        dto.variants.map((v) => v.sku),
+        variants.map((v) => v.sku),
         id,
       );
     }
@@ -259,8 +265,8 @@ export class ProductsService {
         await tx.productImage.deleteMany({ where: { productId: id } });
       }
 
-      if (dto.variants) {
-        await this.syncVariants(tx, id, dto.variants);
+      if (variants) {
+        await this.syncVariants(tx, id, variants);
       }
 
       return tx.product.update({
@@ -398,6 +404,67 @@ export class ProductsService {
     if (existing) {
       throw new ConflictException('Ya existe un producto con ese slug');
     }
+  }
+
+  /** SKU vacío → genera uno interno único (las prendas aún no tienen código). */
+  private async normalizeVariants(
+    variants: Array<{
+      sku?: string;
+      size: string;
+      color: string;
+      stock: number;
+    }>,
+    excludeProductId?: string,
+  ) {
+    const reserved = new Set<string>();
+    const out: Array<{
+      sku: string;
+      size: string;
+      color: string;
+      stock: number;
+    }> = [];
+
+    for (const v of variants) {
+      let sku = (v.sku ?? '').trim().toUpperCase();
+      if (!sku) {
+        sku = await this.generateUniqueSku(v.size, v.color, reserved);
+      } else if (reserved.has(sku)) {
+        throw new BadRequestException('Hay SKUs duplicados en la solicitud');
+      }
+      reserved.add(sku);
+      out.push({
+        sku,
+        size: v.size.trim(),
+        color: v.color.trim(),
+        stock: v.stock,
+      });
+    }
+
+    // reserved already checked within batch; ensureSkusUnique checks DB
+    void excludeProductId;
+    return out;
+  }
+
+  private async generateUniqueSku(
+    size: string,
+    color: string,
+    reserved: Set<string>,
+  ) {
+    const sizePart = slugify(size).slice(0, 8).toUpperCase() || 'T';
+    const colorPart = slugify(color).slice(0, 8).toUpperCase() || 'C';
+    for (let i = 0; i < 30; i++) {
+      const suffix = randomBytes(3).toString('hex').toUpperCase();
+      const sku = `AUTO-${sizePart}-${colorPart}-${suffix}`.slice(0, 60);
+      if (reserved.has(sku)) continue;
+      const taken = await this.prisma.productVariant.findUnique({
+        where: { sku },
+        select: { id: true },
+      });
+      if (!taken) return sku;
+    }
+    throw new BadRequestException(
+      'No se pudo generar un SKU interno. Intenta de nuevo.',
+    );
   }
 
   private async ensureSkusUnique(skus: string[], excludeProductId?: string) {

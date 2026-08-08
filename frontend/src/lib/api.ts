@@ -272,6 +272,8 @@ export const api = {
     token: string,
     body: {
       items: Array<{ variantId: string; quantity: number }>;
+      paymentMethod: 'cash' | 'yape' | 'card' | 'transfer';
+      discountAmount?: number;
       notes?: string;
     },
   ) =>
